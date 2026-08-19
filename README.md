@@ -4,4 +4,6 @@
 
 项目主要目的想进行时间线梳理。相册中可以选择时间段，但相关照片没有tag，我不知道那段时间我的主要经历，也没有总结说这一年中一共去了哪些地方，一共经历了哪些事情。
 
-以这个思路，首先做后端数据库，以lifeperiod为人生主题，其中可以有各种experience，然后用户可以添加照片会自动提示是否这个照片属于这个experience，帮我看下我这个implementation有没有什么问题。
+以这个思路，首先做数据库结构，以lifeperiod为人生主题，其中可以有各种experience，然后用户可以添加照片会自动提示是否这个照片属于这个experience。
+
+继续后端api implementation，首先完成一系列get methods。

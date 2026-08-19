@@ -1,3 +1,4 @@
 .env
 tests/
 .vscode/
+__pycache__/
