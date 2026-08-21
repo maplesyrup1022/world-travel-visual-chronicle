@@ -51,52 +51,6 @@ class LocationResponse(BaseModel):
     longitude: Optional[float] = None
 
 
-class SummaryMediaAssetResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    title: Optional[str] = None
-    description: Optional[str] = None
-    file_url: str
-    captured_at: Optional[date] = None
-    experience_id: Optional[int] = None
-    location_id: Optional[int] = None
-
-
-class SummaryExperienceResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    title: str
-    description: Optional[str] = None
-    experience_type: Optional[str] = None
-    start_date: date
-    end_date: date
-    location_id: Optional[int] = None
-    life_period_id: int
-    media_assets: List[SummaryMediaAssetResponse] = Field(default_factory=list)
-
-
-class SummaryLifePeriodResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    title: str
-    description: Optional[str] = None
-    start_date: date
-    end_date: date
-    tag: Optional[str] = None
-    location_id: int
-    experiences: List[SummaryExperienceResponse] = Field(default_factory=list)
-
-
-class LocationSummaryResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    location: LocationResponse
-    life_periods: List[SummaryLifePeriodResponse]
-
-
 class LifePeriodCreate(BaseModel):
     title: str
     description: Optional[str] = None
@@ -222,3 +176,55 @@ class MediaAssetResponse(BaseModel):
     captured_at: Optional[date] = None
     experience_id: Optional[int] = None
     location_id: Optional[int] = None
+
+
+class SummaryExperienceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    description: Optional[str] = None
+    experience_type: Optional[str] = None
+    start_date: date
+    end_date: date
+    location_id: Optional[int] = None
+    life_period_id: int
+    media_assets: List[MediaAssetResponse] = Field(default_factory=list)
+
+
+class SummaryLifePeriodResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    description: Optional[str] = None
+    start_date: date
+    end_date: date
+    tag: Optional[str] = None
+    location_id: int
+    experiences: List[SummaryExperienceResponse] = Field(default_factory=list)
+
+
+class LocationSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    location: LocationResponse
+    life_periods: List[SummaryLifePeriodResponse]
+
+
+class ExperienceTypeAggResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    experience_type: str
+    count: int
+
+
+class StatsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    life_periods: int
+    experiences: int
+    media_assets: int
+    cities_visited: int
+    countries_visited: int
+    experience_type_agg: List[ExperienceTypeAggResponse]

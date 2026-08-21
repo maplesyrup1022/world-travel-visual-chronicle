@@ -130,32 +130,6 @@ class MediaAsset(Base):
         back_populates="media_assets")
     user: Mapped[User] = relationship(back_populates="media_assets")
 
-    def suggest_matching_experiences(self, session) -> list[Experience]:
-        if self.captured_at is None:
-            return []
-
-        if self.location_id is not None:
-            return (
-                session.query(Experience)
-                .filter(
-                    Experience.user_id == self.user_id,
-                    Experience.location_id == self.location_id,
-                    Experience.start_date <= self.captured_at,
-                    Experience.end_date >= self.captured_at,
-                )
-                .all()
-            )
-
-        return (
-            session.query(Experience)
-            .filter(
-                Experience.user_id == self.user_id,
-                Experience.start_date <= self.captured_at,
-                Experience.end_date >= self.captured_at,
-            )
-            .all()
-        )
-
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")

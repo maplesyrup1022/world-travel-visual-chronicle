@@ -2,6 +2,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI
+from sqlalchemy import func
 from sqlalchemy.orm import Session as SASession
 
 from api_schema import (
@@ -20,10 +21,11 @@ from api_schema import (
     MediaAssetUpdate,
     SummaryExperienceResponse,
     SummaryLifePeriodResponse,
-    SummaryMediaAssetResponse,
     UserCreate,
     UserResponse,
     UserUpdate,
+    ExperienceTypeAggResponse,
+    StatsResponse
 )
 from db_init import Experience, LifePeriod, Location, MediaAsset, User
 from service import (
@@ -35,11 +37,15 @@ from service import (
     extract_image_metadata,
     get_current_user,
     get_db,
+    get_all_experiences_query,
+    get_all_life_periods_query,
+    get_all_media_assets_query,
     get_experience,
     get_life_period,
     get_location,
     get_media_asset,
     validate_start_end_date,
+    get_unique_location_ids_visited
 )
 
 
@@ -60,6 +66,7 @@ api = FastAPI(title="World Travel Visual Chronicle API")
 # - Response models validate the objects returned by route functions.
 # - model_dump(exclude_unset=True) makes partial updates possible.
 
+# year query use overlap semantics, start_date, end_date use strict after/before
 
 @api.post("/users", response_model=UserResponse)
 def create_user(user: UserCreate, db: SASession = Depends(get_db)):
@@ -125,15 +132,12 @@ def get_all_locations(db: SASession = Depends(get_db)):
 
 # This static route must be declared before /locations/{location_id}.
 @api.get("/locations/visited", response_model=List[LocationResponse])
-def get_all_visited_locations(db: SASession = Depends(get_db)):
+def get_all_visited_locations(db: SASession = Depends(get_db), year: Optional[int] = None,
+                              start_date: Optional[date] = None,
+                              end_date: Optional[date] = None):
     user = get_current_user(db)
-    location_ids = set()
-    for model in (LifePeriod, Experience, MediaAsset):
-        rows = db.query(model.location_id).filter(
-            model.user_id == user.id,
-            model.location_id.is_not(None),
-        ).all()
-        location_ids.update(row[0] for row in rows)
+    location_ids = get_unique_location_ids_visited(
+        user.id, db, year, start_date, end_date)
     return db.query(Location).filter(Location.id.in_(location_ids)).all()
 
 
@@ -159,87 +163,30 @@ def get_location_summary(
 ):
     user = get_current_user(db)
     location = get_location(location_id, db)
-    life_period_query = db.query(LifePeriod).filter(
-        LifePeriod.user_id == user.id,
-        LifePeriod.location_id == location_id,
-    )
-    if year is not None:
-        life_period_query = life_period_query.filter(
-            LifePeriod.start_date <= date(year, 12, 31),
-            LifePeriod.end_date >= date(year, 1, 1),
-        )
-    if start_date is not None:
-        life_period_query = life_period_query.filter(
-            LifePeriod.end_date >= start_date)
-    if end_date is not None:
-        life_period_query = life_period_query.filter(
-            LifePeriod.start_date <= end_date)
-
+    life_periods = get_all_life_periods_query(
+        user.id, db, year, start_date, end_date, location_id).all()
     summary_life_periods = []
-    for life_period in life_period_query.order_by(LifePeriod.start_date).all():
-        experience_query = db.query(Experience).filter(
-            Experience.user_id == user.id,
-            Experience.life_period_id == life_period.id,
-        ).order_by(Experience.start_date)
-        if year is not None:
-            experience_query = experience_query.filter(
-                Experience.start_date <= date(year, 12, 31),
-                Experience.end_date >= date(year, 1, 1),
-            )
-        if start_date is not None:
-            experience_query = experience_query.filter(
-                Experience.end_date >= start_date)
-        if end_date is not None:
-            experience_query = experience_query.filter(
-                Experience.start_date <= end_date)
-        if experience_limit is not None:
-            experience_query = experience_query.limit(experience_limit)
-
+    for life_period in life_periods:
+        experiences = get_all_experiences_query(
+            user.id, life_period.id, db, year, start_date, end_date,
+            experience_limit, location_id).all()
         summary_experiences = []
-        for experience in experience_query.all():
-            media_query = db.query(MediaAsset).filter(
-                MediaAsset.user_id == user.id,
-                MediaAsset.experience_id == experience.id,
-            ).order_by(MediaAsset.captured_at)
-            if year is not None:
-                media_query = media_query.filter(
-                    MediaAsset.captured_at >= date(year, 1, 1),
-                    MediaAsset.captured_at <= date(year, 12, 31),
-                )
-            if start_date is not None:
-                media_query = media_query.filter(
-                    MediaAsset.captured_at >= start_date)
-            if end_date is not None:
-                media_query = media_query.filter(
-                    MediaAsset.captured_at <= end_date)
-            if media_asset_limit is not None:
-                media_query = media_query.limit(media_asset_limit)
+        for experience in experiences:
+            media_assets = get_all_media_assets_query(
+                user.id, experience.id, db, year, start_date, end_date,
+                media_asset_limit).all()
+            summary_experience = SummaryExperienceResponse.model_validate(
+                experience)
+            summary_experience.media_assets = [
+                MediaAssetResponse.model_validate(media)
+                for media in media_assets
+            ]
+            summary_experiences.append(summary_experience)
 
-            summary_experiences.append(SummaryExperienceResponse(
-                id=experience.id,
-                title=experience.title,
-                description=experience.description,
-                experience_type=experience.experience_type,
-                start_date=experience.start_date,
-                end_date=experience.end_date,
-                location_id=experience.location_id,
-                life_period_id=experience.life_period_id,
-                media_assets=[
-                    SummaryMediaAssetResponse.model_validate(media)
-                    for media in media_query.all()
-                ],
-            ))
-
-        summary_life_periods.append(SummaryLifePeriodResponse(
-            id=life_period.id,
-            title=life_period.title,
-            description=life_period.description,
-            start_date=life_period.start_date,
-            end_date=life_period.end_date,
-            tag=life_period.tag,
-            location_id=life_period.location_id,
-            experiences=summary_experiences,
-        ))
+        summary_life_period = SummaryLifePeriodResponse.model_validate(
+            life_period)
+        summary_life_period.experiences = summary_experiences
+        summary_life_periods.append(summary_life_period)
 
     return LocationSummaryResponse(
         location=LocationResponse.model_validate(location),
@@ -299,24 +246,14 @@ def get_all_life_periods(
     db: SASession = Depends(get_db),
 ):
     user = get_current_user(db)
-    query = db.query(LifePeriod).filter(LifePeriod.user_id == user.id)
-    if year is not None:
-        query = query.filter(
-            LifePeriod.start_date <= date(year, 12, 31),
-            LifePeriod.end_date >= date(year, 1, 1),
-        )
-    if start_date is not None:
-        query = query.filter(LifePeriod.end_date >= start_date)
-    if end_date is not None:
-        query = query.filter(LifePeriod.start_date <= end_date)
-    if location_id is not None:
-        query = query.filter(LifePeriod.location_id == location_id)
-    return query.order_by(LifePeriod.start_date).all()
+    return get_all_life_periods_query(
+        user.id, db, year, start_date, end_date, location_id).all()
 
 
 @api.get("/life-periods/{life_period_id}", response_model=LifePeriodResponse)
 def get_life_period_route(life_period_id: int, db: SASession = Depends(get_db)):
-    return get_life_period(life_period_id, db)
+    user = get_current_user(db)
+    return get_life_period(user.id, life_period_id, db)
 
 
 @api.put("/life-periods/{life_period_id}", response_model=LifePeriodResponse)
@@ -326,7 +263,7 @@ def update_life_period(
     db: SASession = Depends(get_db),
 ):
     user = get_current_user(db)
-    life_period = get_life_period(life_period_id, db)
+    life_period = get_life_period(user.id, life_period_id, db)
     if data.title is not None:
         check_unique_life_period_title(user.id, data.title, db, life_period.id)
     if data.location_id is not None:
@@ -345,7 +282,8 @@ def update_life_period(
 
 @api.delete("/life-periods/{life_period_id}")
 def delete_life_period(life_period_id: int, db: SASession = Depends(get_db)):
-    life_period = get_life_period(life_period_id, db)
+    user = get_current_user(db)
+    life_period = get_life_period(user.id, life_period_id, db)
     db.delete(life_period)
     db.commit()
     return {"message": "Life period deleted successfully"}
@@ -361,7 +299,7 @@ def create_experience(
     db: SASession = Depends(get_db),
 ):
     user = get_current_user(db)
-    get_life_period(life_period_id, db)
+    get_life_period(user.id, life_period_id, db)
     if data.location_id is not None:
         get_location(data.location_id, db)
     check_unique_experience_title(user.id, data.title, db)
@@ -386,29 +324,17 @@ def get_all_experiences(
     location_id: Optional[int] = None,
     db: SASession = Depends(get_db),
 ):
-    get_life_period(life_period_id, db)
-    query = db.query(Experience).filter(
-        Experience.life_period_id == life_period_id)
-    if year is not None:
-        query = query.filter(
-            Experience.start_date <= date(year, 12, 31),
-            Experience.end_date >= date(year, 1, 1),
-        )
-    if start_date is not None:
-        query = query.filter(Experience.end_date >= start_date)
-    if end_date is not None:
-        query = query.filter(Experience.start_date <= end_date)
-    if location_id is not None:
-        query = query.filter(Experience.location_id == location_id)
-    query = query.order_by(Experience.start_date)
-    if experience_limit is not None:
-        query = query.limit(experience_limit)
-    return query.all()
+    user = get_current_user(db)
+    get_life_period(user.id, life_period_id, db)
+    return get_all_experiences_query(
+        user.id, life_period_id, db, year, start_date, end_date,
+        experience_limit, location_id).all()
 
 
 @api.get("/experiences/{experience_id}", response_model=ExperienceResponse)
 def get_experience_route(experience_id: int, db: SASession = Depends(get_db)):
-    return get_experience(experience_id, db)
+    user = get_current_user(db)
+    return get_experience(user.id, experience_id, db)
 
 
 @api.put("/experiences/{experience_id}", response_model=ExperienceResponse)
@@ -418,13 +344,13 @@ def update_experience(
     db: SASession = Depends(get_db),
 ):
     user = get_current_user(db)
-    experience = get_experience(experience_id, db)
+    experience = get_experience(user.id, experience_id, db)
     if data.title is not None:
         check_unique_experience_title(user.id, data.title, db, experience.id)
     if data.location_id is not None:
         get_location(data.location_id, db)
     if data.life_period_id is not None:
-        get_life_period(data.life_period_id, db)
+        get_life_period(user.id, data.life_period_id, db)
     values = data.model_dump(exclude_unset=True)
     validate_start_end_date(
         values.get("start_date", experience.start_date),
@@ -439,7 +365,8 @@ def update_experience(
 
 @api.delete("/experiences/{experience_id}")
 def delete_experience(experience_id: int, db: SASession = Depends(get_db)):
-    experience = get_experience(experience_id, db)
+    user = get_current_user(db)
+    experience = get_experience(user.id, experience_id, db)
     db.delete(experience)
     db.commit()
     return {"message": "Experience deleted successfully"}
@@ -456,7 +383,7 @@ def create_media_asset(data: MediaAssetCreate, db: SASession = Depends(get_db)):
     if data.location_id is not None:
         get_location(data.location_id, db)
     if data.experience_id is not None:
-        get_experience(data.experience_id, db)
+        get_experience(user.id, data.experience_id, db)
     media_asset = MediaAsset(**data.model_dump(), user_id=user.id)
     if media_asset.captured_at is None:
         media_asset.captured_at = extract_image_metadata(data.file_url)[
@@ -469,7 +396,8 @@ def create_media_asset(data: MediaAssetCreate, db: SASession = Depends(get_db)):
 
 @api.get("/media-assets/{media_asset_id}", response_model=MediaAssetResponse)
 def get_media_asset_route(media_asset_id: int, db: SASession = Depends(get_db)):
-    return get_media_asset(media_asset_id, db)
+    user = get_current_user(db)
+    return get_media_asset(user.id, media_asset_id, db)
 
 
 @api.get("/experiences/{experience_id}/media-assets", response_model=List[MediaAssetResponse])
@@ -482,24 +410,11 @@ def get_all_media_assets(
     location_id: Optional[int] = None,
     db: SASession = Depends(get_db),
 ):
-    get_experience(experience_id, db)
-    query = db.query(MediaAsset).filter(
-        MediaAsset.experience_id == experience_id)
-    if year is not None:
-        query = query.filter(
-            MediaAsset.captured_at >= date(year, 1, 1),
-            MediaAsset.captured_at <= date(year, 12, 31),
-        )
-    if start_date is not None:
-        query = query.filter(MediaAsset.captured_at >= start_date)
-    if end_date is not None:
-        query = query.filter(MediaAsset.captured_at <= end_date)
-    if location_id is not None:
-        query = query.filter(MediaAsset.location_id == location_id)
-    query = query.order_by(MediaAsset.captured_at)
-    if media_asset_limit is not None:
-        query = query.limit(media_asset_limit)
-    return query.all()
+    user = get_current_user(db)
+    get_experience(user.id, experience_id, db)
+    return get_all_media_assets_query(
+        user.id, experience_id, db, year, start_date, end_date,
+        media_asset_limit, location_id).all()
 
 
 @api.put("/media-assets/{media_asset_id}", response_model=MediaAssetResponse)
@@ -509,11 +424,11 @@ def update_media_asset(
     db: SASession = Depends(get_db),
 ):
     user = get_current_user(db)
-    media_asset = get_media_asset(media_asset_id, db)
+    media_asset = get_media_asset(user.id, media_asset_id, db)
     if data.title is not None:
         check_unique_media_asset_title(user.id, data.title, db, media_asset.id)
     if data.experience_id is not None:
-        get_experience(data.experience_id, db)
+        get_experience(user.id, data.experience_id, db)
     if data.location_id is not None:
         get_location(data.location_id, db)
     for key, value in data.model_dump(exclude_unset=True).items():
@@ -525,7 +440,110 @@ def update_media_asset(
 
 @api.delete("/media-assets/{media_asset_id}")
 def delete_media_asset(media_asset_id: int, db: SASession = Depends(get_db)):
-    media_asset = get_media_asset(media_asset_id, db)
+    user = get_current_user(db)
+    media_asset = get_media_asset(user.id, media_asset_id, db)
     db.delete(media_asset)
     db.commit()
     return {"message": "Media asset deleted successfully"}
+
+
+@api.get("/timeline", response_model=List[SummaryLifePeriodResponse])
+def get_timeline(db: SASession = Depends(get_db), year: Optional[int] = None,
+                 start_date: Optional[date] = None, end_date: Optional[date] = None,
+                 experience_limit: Optional[int] = None,
+                 media_asset_limit: Optional[int] = 10):
+    user = get_current_user(db)
+    life_periods = get_all_life_periods_query(
+        user.id, db, year, start_date, end_date).all()
+    summary_life_periods = []
+    for life_period in life_periods:
+        experiences = get_all_experiences_query(
+            user.id, life_period.id, db, year, start_date, end_date,
+            experience_limit).all()
+        summary_experiences = []
+        for experience in experiences:
+            media_assets = get_all_media_assets_query(
+                user.id, experience.id, db, year, start_date, end_date,
+                media_asset_limit).all()
+            summary_experience = SummaryExperienceResponse.model_validate(
+                experience)
+            summary_experience.media_assets = [
+                MediaAssetResponse.model_validate(media)
+                for media in media_assets
+            ]
+            summary_experiences.append(summary_experience)
+
+        summary_life_period = SummaryLifePeriodResponse.model_validate(
+            life_period)
+        summary_life_period.experiences = summary_experiences
+        summary_life_periods.append(summary_life_period)
+
+    return summary_life_periods
+
+
+@api.get("/timeline/stats", response_model=StatsResponse)
+def get_timeline_stats(db: SASession = Depends(get_db), year: Optional[int] = None,
+                       start_date: Optional[date] = None, end_date: Optional[int] = None):
+    user = get_current_user(db)
+    life_periods = get_all_life_periods_query(
+        user.id, db, year, start_date, end_date).all()
+    count_life_periods = len(life_periods)
+    count_experiences = 0
+    count_media_assets = 0
+    experience_type_agg_dict = {}
+    for life_period in life_periods:
+        experiences = get_all_experiences_query(
+            user.id, life_period.id, db, year, start_date, end_date).all()
+        count_experiences += len(experiences)
+        for experience in experiences:
+            count_media_assets += get_all_media_assets_query(
+                user.id, experience.id, db, year, start_date, end_date).count()
+            experience_type_agg_dict[experience.experience_type] = experience_type_agg_dict.get(
+                experience.experience_type, 0) + 1
+    experience_type_agg = []
+    for key, value in experience_type_agg_dict.items():
+        experience_type_agg.append(
+            ExperienceTypeAggResponse.model_validate({"experience_type": key, "count": value}))
+    location_ids = get_unique_location_ids_visited(
+        user.id, db, year, start_date, end_date)
+    query = db.query(Location).filter(Location.id.in_(location_ids))
+    stats_response = StatsResponse(
+        life_periods=count_life_periods,
+        experiences=count_experiences,
+        media_assets=count_media_assets,
+        cities_visited=query.with_entities(
+            func.count(func.distinct(Location.city))).scalar(),
+        countries_visited=query.with_entities(
+            func.count(func.distinct(Location.country))).scalar(),
+        experience_type_agg=experience_type_agg
+    )
+    return stats_response
+
+
+'''
+def suggest_matching_experiences(self, session) -> list[Experience]:
+        if self.captured_at is None:
+            return []
+
+        if self.location_id is not None:
+            return (
+                session.query(Experience)
+                .filter(
+                    Experience.user_id == self.user_id,
+                    Experience.location_id == self.location_id,
+                    Experience.start_date <= self.captured_at,
+                    Experience.end_date >= self.captured_at,
+                )
+                .all()
+            )
+
+        return (
+            session.query(Experience)
+            .filter(
+                Experience.user_id == self.user_id,
+                Experience.start_date <= self.captured_at,
+                Experience.end_date >= self.captured_at,
+            )
+            .all()
+        )
+'''

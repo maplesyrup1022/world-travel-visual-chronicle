@@ -3,11 +3,13 @@ from typing import Optional
 
 import piexif
 from fastapi import HTTPException
-from sqlalchemy.orm import Session as SASession
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Query, Session as SASession
 from PIL import Image
 
 from db_init import Experience, LifePeriod, Location, MediaAsset, User, Session
 
+# test use only replaced with user auth later
 CURRENT_USER_ID = 1
 
 
@@ -110,10 +112,9 @@ def get_location(location_id: int, db: SASession) -> Location:
     return location
 
 
-def get_life_period(life_period_id: int, db: SASession) -> LifePeriod:
-    user = get_current_user(db)
+def get_life_period(user_id, life_period_id: int, db: SASession) -> LifePeriod:
     life_period = db.query(LifePeriod).filter(
-        LifePeriod.user_id == user.id,
+        LifePeriod.user_id == user_id,
         LifePeriod.id == life_period_id,
     ).first()
     if not life_period:
@@ -121,26 +122,151 @@ def get_life_period(life_period_id: int, db: SASession) -> LifePeriod:
     return life_period
 
 
-def get_experience(experience_id: int, db: SASession) -> Experience:
-    user = get_current_user(db)
+def get_experience(user_id, experience_id: int, db: SASession) -> Experience:
     experience = db.query(Experience).filter(
         Experience.id == experience_id,
-        Experience.user_id == user.id,
+        Experience.user_id == user_id,
     ).first()
     if not experience:
         raise HTTPException(status_code=404, detail="Experience not found")
     return experience
 
 
-def get_media_asset(media_asset_id: int, db: SASession) -> MediaAsset:
-    user = get_current_user(db)
+def get_media_asset(user_id, media_asset_id: int, db: SASession) -> MediaAsset:
     media_asset = db.query(MediaAsset).filter(
         MediaAsset.id == media_asset_id,
-        MediaAsset.user_id == user.id,
+        MediaAsset.user_id == user_id,
     ).first()
     if not media_asset:
         raise HTTPException(status_code=404, detail="Media asset not found")
     return media_asset
+
+
+def get_unique_location_ids_visited(user_id: int, db: SASession,
+                                    year: Optional[int] = None, start_date: Optional[date] = None,
+                                    end_date: Optional[date] = None) -> set:
+    location_ids = set()
+    for model in (LifePeriod, Experience):
+        query = db.query(model).filter(
+            model.user_id == user_id,
+            model.location_id.is_not(None)
+        )
+        if year is not None:
+            query = query.filter(or_(
+                and_(model.end_date <= date(year, 12, 31),
+                     model.end_date >= date(year, 1, 1)),
+                and_(model.start_date >= date(year, 1, 1),
+                     model.start_date <= date(year, 12, 31))
+            ))
+        if start_date is not None:
+            query = query.filter(model.start_date >= start_date)
+        if end_date is not None:
+            query = query.filter(model.end_date <= end_date)
+        rows = query.with_entities(model.location_id).all()
+        location_ids.update(row[0] for row in rows)
+    query = db.query(MediaAsset).filter(
+        MediaAsset.user_id == user_id,
+        MediaAsset.location_id.is_not(None)
+    )
+    if year is not None:
+        query = query.filter(MediaAsset.captured_at <= date(year, 12, 31),
+                             MediaAsset.captured_at >= date(year, 1, 1),)
+    if start_date is not None:
+        query = query.filter(MediaAsset.captured_at >= start_date)
+    if end_date is not None:
+        query = query.filter(MediaAsset.captured_at <= end_date)
+    rows = query.with_entities(MediaAsset.location_id).all()
+    location_ids.update(row[0] for row in rows)
+    return location_ids
+
+
+def get_all_life_periods_query(
+    user_id: int,
+    db: SASession,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    location_id: Optional[int] = None,
+) -> Query:
+    query = db.query(LifePeriod).filter(LifePeriod.user_id == user_id)
+    if year is not None:
+        query = query.filter(or_(
+                             and_(LifePeriod.end_date <= date(year, 12, 31),
+                                  LifePeriod.end_date >= date(year, 1, 1)),
+                             and_(LifePeriod.start_date >= date(year, 1, 1),
+                                  LifePeriod.start_date <= date(year, 12, 31))
+                             ))
+    if start_date is not None:
+        query = query.filter(LifePeriod.start_date >= start_date)
+    if end_date is not None:
+        query = query.filter(LifePeriod.end_date <= end_date)
+    if location_id is not None:
+        query = query.filter(LifePeriod.location_id == location_id)
+    return query.order_by(LifePeriod.start_date)
+
+
+def get_all_experiences_query(
+    user_id: int,
+    life_period_id: int,
+    db: SASession,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    experience_limit: Optional[int] = None,
+    location_id: Optional[int] = None,
+) -> Query:
+    query = db.query(Experience).filter(
+        Experience.user_id == user_id,
+        Experience.life_period_id == life_period_id,
+    )
+    if year is not None:
+        query = query.filter(or_(
+                             and_(Experience.end_date <= date(year, 12, 31),
+                                  Experience.end_date >= date(year, 1, 1)),
+                             and_(Experience.start_date >= date(year, 1, 1),
+                                  Experience.start_date <= date(year, 12, 31))
+                             ))
+    if start_date is not None:
+        query = query.filter(Experience.start_date >= start_date)
+    if end_date is not None:
+        query = query.filter(Experience.end_date <= end_date)
+    if location_id is not None:
+        query = query.filter(Experience.location_id == location_id)
+    query = query.order_by(Experience.start_date)
+    if experience_limit is not None:
+        query = query.limit(experience_limit)
+    return query
+
+
+def get_all_media_assets_query(
+    user_id: int,
+    experience_id: int,
+    db: SASession,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    media_asset_limit: Optional[int] = None,
+    location_id: Optional[int] = None,
+) -> Query:
+    query = db.query(MediaAsset).filter(
+        MediaAsset.user_id == user_id,
+        MediaAsset.experience_id == experience_id,
+    )
+    if year is not None:
+        query = query.filter(
+            MediaAsset.captured_at >= date(year, 1, 1),
+            MediaAsset.captured_at <= date(year, 12, 31),
+        )
+    if start_date is not None:
+        query = query.filter(MediaAsset.captured_at >= start_date)
+    if end_date is not None:
+        query = query.filter(MediaAsset.captured_at <= end_date)
+    if location_id is not None:
+        query = query.filter(MediaAsset.location_id == location_id)
+    query = query.order_by(MediaAsset.captured_at)
+    if media_asset_limit is not None:
+        query = query.limit(media_asset_limit)
+    return query
 
 
 def validate_start_end_date(new_start_date: date, new_end_date: date) -> None:
