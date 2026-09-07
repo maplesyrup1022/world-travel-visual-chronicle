@@ -2,6 +2,7 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session as SASession
 
@@ -51,7 +52,18 @@ from service import (
 
 api = FastAPI(title="World Travel Visual Chronicle API")
 
+origins = [
+    "http://localhost:3000",  # Next.js dev server
+    "http://127.0.0.1:3000",
+]
 
+api.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,            # allowed frontend origins
+    allow_credentials=True,
+    allow_methods=["*"],              # GET, POST, PUT, DELETE, etc.
+    allow_headers=["*"],              # Authorization, Content-Type, etc.
+)
 # Backend notes:
 # - api_schema.py contains Pydantic request and response models.
 # - service.py contains database sessions, reusable validation, queries, and metadata extraction.
@@ -79,13 +91,13 @@ def create_user(user: UserCreate, db: SASession = Depends(get_db)):
     return new_user
 
 
-@api.get("/users", response_model=UserResponse)
+@api.get("/user/current", response_model=UserResponse)
 def get_user(db: SASession = Depends(get_db)):
     # Get the current user. Authentication will replace this later.
     return get_current_user(db)
 
 
-@api.get("/users/all", response_model=List[UserResponse])
+@api.get("/users", response_model=List[UserResponse])
 def get_all_users(db: SASession = Depends(get_db)):
     # Admin-only behavior should be added when authentication exists.
     return db.query(User).all()
@@ -447,8 +459,8 @@ def delete_media_asset(media_asset_id: int, db: SASession = Depends(get_db)):
     return {"message": "Media asset deleted successfully"}
 
 
-@api.get("/timeline", response_model=List[SummaryLifePeriodResponse])
-def get_timeline(db: SASession = Depends(get_db), year: Optional[int] = None,
+@api.get("/chronicle", response_model=List[SummaryLifePeriodResponse])
+def get_chronicle(db: SASession = Depends(get_db), year: Optional[int] = None,
                  start_date: Optional[date] = None, end_date: Optional[date] = None,
                  experience_limit: Optional[int] = None,
                  media_asset_limit: Optional[int] = 10):
@@ -481,8 +493,8 @@ def get_timeline(db: SASession = Depends(get_db), year: Optional[int] = None,
     return summary_life_periods
 
 
-@api.get("/timeline/stats", response_model=StatsResponse)
-def get_timeline_stats(db: SASession = Depends(get_db), year: Optional[int] = None,
+@api.get("/chronicle/stats", response_model=StatsResponse)
+def get_chronicle_stats(db: SASession = Depends(get_db), year: Optional[int] = None,
                        start_date: Optional[date] = None, end_date: Optional[int] = None):
     user = get_current_user(db)
     life_periods = get_all_life_periods_query(
