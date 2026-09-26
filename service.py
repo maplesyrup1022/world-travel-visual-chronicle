@@ -152,16 +152,16 @@ def get_unique_location_ids_visited(user_id: int, db: SASession,
             model.location_id.is_not(None)
         )
         if year is not None:
-            query = query.filter(or_(
-                and_(model.end_date <= date(year, 12, 31),
-                     model.end_date >= date(year, 1, 1)),
-                and_(model.start_date >= date(year, 1, 1),
-                     model.start_date <= date(year, 12, 31))
-            ))
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+            query = query.filter(
+                model.start_date <= year_end,
+                model.end_date >= year_start,
+            )
         if start_date is not None:
-            query = query.filter(model.start_date >= start_date)
+            query = query.filter(model.end_date >= start_date)
         if end_date is not None:
-            query = query.filter(model.end_date <= end_date)
+            query = query.filter(model.start_date <= end_date)
         rows = query.with_entities(model.location_id).all()
         location_ids.update(row[0] for row in rows)
     query = db.query(MediaAsset).filter(

@@ -1,9 +1,5 @@
-import Image from "next/image";
 import Map from "./components/Map";
 import NavigationBar from "./components/NavBar";
-import Timeline from "./components/Timeline";
-import Link from "next/link";
-import Create from "./components/Create";
 
 export default async function Home() {
   const res = await fetch("http://127.0.0.1:8000/locations/visited", {
@@ -11,12 +7,9 @@ export default async function Home() {
   });
   const visitedLocations = await res.json();
   return (
-    <div>
+    <div className="relative h-full w-full z-0">
       <NavigationBar />
       <Map visitedLocations={visitedLocations} />
-      <Create />
-      <Timeline />
-      <Link href="/chronicle">View Chronicle</Link>
     </div>
   );
 }

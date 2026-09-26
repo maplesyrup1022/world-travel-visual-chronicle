@@ -42,8 +42,8 @@ class Location(Base):
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     city: Mapped[str] = mapped_column(String(255), nullable=False)
     country: Mapped[str] = mapped_column(String(100), nullable=False)
-    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("city", "country", name="uq_location_city_country"),

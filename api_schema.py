@@ -28,16 +28,16 @@ class LocationCreate(BaseModel):
     name: Optional[str] = None
     city: str
     country: str
-    latitude: Optional[float] = None
     longitude: Optional[float] = None
+    latitude: Optional[float] = None
 
 
 class LocationUpdate(BaseModel):
     name: Optional[str] = None
     city: Optional[str] = None
     country: Optional[str] = None
-    latitude: Optional[float] = None
     longitude: Optional[float] = None
+    latitude: Optional[float] = None
 
 
 class LocationResponse(BaseModel):
@@ -47,8 +47,8 @@ class LocationResponse(BaseModel):
     name: Optional[str] = None
     city: str
     country: str
-    latitude: Optional[float] = None
     longitude: Optional[float] = None
+    latitude: Optional[float] = None
 
 
 class LifePeriodCreate(BaseModel):
@@ -135,7 +135,7 @@ class MediaAssetCreate(BaseModel):
     experience_id: Optional[int] = None
     location_id: Optional[int] = None
 
-    @model_validator(mode="after")
+    """@model_validator(mode="after")
     def validate_file_url(self):
         try:
             image = Image.open(self.file_url)
@@ -143,7 +143,7 @@ class MediaAssetCreate(BaseModel):
         except (FileNotFoundError, OSError) as exception:
             raise ValueError(
                 "input file url must be a valid image") from exception
-        return self
+        return self"""
 
 
 class MediaAssetUpdate(BaseModel):
@@ -154,7 +154,7 @@ class MediaAssetUpdate(BaseModel):
     experience_id: Optional[int] = None
     location_id: Optional[int] = None
 
-    @model_validator(mode="after")
+    """@model_validator(mode="after")
     def validate_file_url(self):
         if self.file_url:
             try:
@@ -163,7 +163,7 @@ class MediaAssetUpdate(BaseModel):
             except (FileNotFoundError, OSError) as exception:
                 raise ValueError(
                     "input file url must be a valid image") from exception
-        return self
+        return self"""
 
 
 class MediaAssetResponse(BaseModel):

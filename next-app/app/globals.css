@@ -19,8 +19,68 @@
   }
 }
 
+@theme {
+  --font-ribbon: var(--font-alegreya);
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.timeline-range {
+  height: 2rem;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.timeline-range::-webkit-slider-runnable-track {
+  height: 1.5rem;
+  background: transparent;
+}
+
+.timeline-range::-moz-range-track {
+  height: 1.5rem;
+  background: transparent;
+}
+
+.timeline-range::-webkit-slider-thumb {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.25rem;
+  appearance: none;
+  border: 2px solid #f3f4f6;
+  border-radius: 9999px;
+  background: #fcfcfc;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 35%);
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.timeline-range::-moz-range-thumb {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid #f3f4f6;
+  border-radius: 9999px;
+  background: #fcfcfc;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 35%);
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.timeline-date-input {
+  color-scheme: dark;
+}
+
+.timeline-date-input::-webkit-calendar-picker-indicator {
+  opacity: 0.75;
 }
