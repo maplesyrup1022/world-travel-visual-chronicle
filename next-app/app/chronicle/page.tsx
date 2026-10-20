@@ -9,5 +9,5 @@ export default async function ChroniclePage() {
     next: { revalidate: 20 },
   });
   const stats = await res2.json();
-  return <Chronicle chronicle={chronicle} stats={stats} />;
+  return <Chronicle chronicle={chronicle} stats={stats} year={2025} />;
 }

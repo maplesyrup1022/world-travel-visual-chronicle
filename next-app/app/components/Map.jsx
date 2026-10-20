@@ -17,17 +17,28 @@ const Map = ({ visitedLocations }) => {
   const [visibleLocations, setVisibleLocations] = useState(visitedLocations);
   const [hoveredLocationSummary, setHoveredLocationSummary] = useState(null);
   const [clickedLocationSummary, setClickedLocationSummary] = useState(null);
+  const dateRangeRequestRef = useRef(0);
+  const dateRangeParamsRef = useRef(new URLSearchParams());
+  const summaryRequestRef = useRef(0);
+  const summaryCloseTimerRef = useRef(null);
+  const [dateRangeQuery, setDateRangeQuery] = useState("");
 
-  const fetchLocationSummary = async (id) => {
-    const res = await fetch(`http://127.0.0.1:8000/locations/${id}/summary`, {
-      next: { revalidate: 20 },
-    });
+  const fetchLocationSummary = async (
+    id,
+    params = dateRangeParamsRef.current,
+  ) => {
+    const requestId = ++summaryRequestRef.current;
+    const query = params.toString();
+    const res = await fetch(
+      `http://127.0.0.1:8000/locations/${id}/summary${query ? `?${query}` : ""}`,
+      { next: { revalidate: 20 } },
+    );
 
     if (!res.ok) {
-      return null;
+      return { requestId, summary: null };
     }
 
-    return res.json();
+    return { requestId, summary: await res.json() };
   };
 
   const handleMouseHover = useEffectEvent(async (id) => {
@@ -35,37 +46,85 @@ const Map = ({ visitedLocations }) => {
       return;
     }
 
-    const summary = await fetchLocationSummary(id);
+    window.clearTimeout(summaryCloseTimerRef.current);
+    const { requestId, summary } = await fetchLocationSummary(id);
+    if (requestId !== summaryRequestRef.current) return;
     setHoveredLocationSummary(summary);
   });
 
   const handleMouseLeave = useEffectEvent(() => {
     if (!clickedLocationSummary) {
-      setHoveredLocationSummary(null);
+      summaryCloseTimerRef.current = window.setTimeout(() => {
+        setHoveredLocationSummary(null);
+      }, 300);
     }
   });
 
+  const handleSummaryMouseEnter = () => {
+    window.clearTimeout(summaryCloseTimerRef.current);
+  };
+
   const handleMouseClick = useEffectEvent(async (id) => {
-    const summary = await fetchLocationSummary(id);
+    const { requestId, summary } = await fetchLocationSummary(id);
+    if (requestId !== summaryRequestRef.current) return;
     setClickedLocationSummary(summary);
     setHoveredLocationSummary(summary);
   });
 
   const handleCloseSummary = () => {
+    window.clearTimeout(summaryCloseTimerRef.current);
     setClickedLocationSummary(null);
     setHoveredLocationSummary(null);
   };
 
+  const handleSummaryChange = (summary) => {
+    if (!summary) {
+      handleCloseSummary();
+      return;
+    }
+
+    if (clickedLocationSummary) setClickedLocationSummary(summary);
+    setHoveredLocationSummary(summary);
+  };
+
+  // In React, data flows downward (one-way data binding). A child component cannot directly modify a parent's
+  // state.
+  // Instead, the parent must pass down a function (callback) as a prop. When the child calls this function,
+  // it triggers the state change back up in the parent.
+  // Never try to mutate props directly. Props are strictly read-only.
   const handleDateRangeChange = async ({ startDate, endDate, year }) => {
-    const params = year
-      ? new URLSearchParams({ year: String(year) })
-      : new URLSearchParams({ start_date: startDate, end_date: endDate });
-    const response = await fetch(
+    const requestId = ++dateRangeRequestRef.current;
+    ++summaryRequestRef.current;
+    const params =
+      year != null
+        ? new URLSearchParams({ year: String(year) })
+        : new URLSearchParams({ start_date: startDate, end_date: endDate });
+    dateRangeParamsRef.current = params;
+    setDateRangeQuery(params.toString());
+    const selectedSummary = clickedLocationSummary || hoveredLocationSummary;
+    const responsePromise = fetch(
       `http://127.0.0.1:8000/locations/visited?${params.toString()}`,
     );
+    const summaryPromise = selectedSummary
+      ? fetchLocationSummary(selectedSummary.location.id, params)
+      : Promise.resolve(null);
+    const [response, summaryResult] = await Promise.all([
+      responsePromise,
+      summaryPromise,
+    ]);
 
+    const locations = response.ok ? await response.json() : null;
+    if (requestId !== dateRangeRequestRef.current) return;
     if (response.ok) {
-      setVisibleLocations(await response.json());
+      setVisibleLocations(locations);
+    }
+    if (
+      selectedSummary &&
+      summaryResult?.requestId === summaryRequestRef.current
+    ) {
+      const { summary } = summaryResult;
+      if (clickedLocationSummary) setClickedLocationSummary(summary);
+      setHoveredLocationSummary(summary);
     }
   };
 
@@ -81,6 +140,8 @@ const Map = ({ visitedLocations }) => {
     return () => mapRef.current.remove();
   }, []);
 
+  useEffect(() => () => window.clearTimeout(summaryCloseTimerRef.current), []);
+
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -92,7 +153,7 @@ const Map = ({ visitedLocations }) => {
         <div class="relative w-25 h-12.5">
           <img src="/combined-yellow-pin.png" class="absolute inset-0 w-full h-full"/>
           <span class="absolute inset-0 flex items-center justify-center
-                text-xs font-ribbon font-bold translate-x-2.5 translate-y-2">${city}, ${country}</span>
+                text-xs font-alegreya font-bold translate-x-2.5 translate-y-2">${city}, ${country}</span>
         </div>
   `;
         const mapMarker = new mapboxgl.Marker(markerElement)
@@ -128,6 +189,9 @@ const Map = ({ visitedLocations }) => {
             clickedLocationSummary || hoveredLocationSummary
           }
           onClose={handleCloseSummary}
+          onMouseEnter={handleSummaryMouseEnter}
+          onSummaryChange={handleSummaryChange}
+          dateRangeQuery={dateRangeQuery}
         />
       )}
       <Create />

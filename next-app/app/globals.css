@@ -20,7 +20,10 @@
 }
 
 @theme {
-  --font-ribbon: var(--font-alegreya);
+  --font-alegreya: var(--font-alegreya);
+  --font-caveat: var(--caveat-font);
+  --font-noto-serif: var(--noto-serif-font);
+  --font-roboto-slab: var(--roboto-slab-font);
 }
 
 body {

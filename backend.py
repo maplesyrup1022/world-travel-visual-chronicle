@@ -180,12 +180,12 @@ def get_location_summary(
     summary_life_periods = []
     for life_period in life_periods:
         experiences = get_all_experiences_query(
-            user.id, life_period.id, db, year, start_date, end_date,
+            user.id, life_period.id, db, None, None, None,
             experience_limit, location_id).all()
         summary_experiences = []
         for experience in experiences:
             media_assets = get_all_media_assets_query(
-                user.id, experience.id, db, year, start_date, end_date,
+                user.id, experience.id, db, None, None, None,
                 media_asset_limit).all()
             summary_experience = SummaryExperienceResponse.model_validate(
                 experience)

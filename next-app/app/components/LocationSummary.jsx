@@ -1,4 +1,8 @@
-import React from "react";
+"use client";
+
+import React, { useState } from "react";
+
+const API_BASE = "http://127.0.0.1:8000";
 
 const formatDateRange = (startDate, endDate) => {
   if (!startDate && !endDate) return "Date unknown";
@@ -10,18 +14,277 @@ const markerColors = [
   "bg-[#FFCAD4]",
   "bg-[#FFF275]",
   "bg-[#B2F7EF]",
-
   "bg-[#FBC490]",
   "bg-[#D8B4F8]",
 ];
 
-const LocationSummary = ({ hoveredLocationSummary, onClose }) => {
-  if (!hoveredLocationSummary) return null;
+const textColors = ["text-[#307b9c]", "text-[#1a385d]"];
+const fieldClass =
+  "w-full rounded border border-[#9e4d58]/35 bg-white/80 px-2 py-1 text-sm text-[#1a385d] outline-none focus:border-[#9e4d58] focus:ring-1 focus:ring-[#9e4d58]";
 
-  const { location, life_periods = [] } = hoveredLocationSummary;
+const EditableValue = ({
+  editing,
+  value,
+  onChange,
+  label,
+  type = "text",
+  multiline = false,
+  className = "",
+}) => {
+  if (!editing) return value || null;
+
+  const commonProps = {
+    "aria-label": label,
+    className: `${fieldClass} ${className}`,
+    onChange: (event) => onChange(event.target.value),
+    value: value ?? "",
+  };
+
+  return multiline ? (
+    <textarea {...commonProps} rows={2} />
+  ) : (
+    <input {...commonProps} type={type} />
+  );
+};
+
+const readResponse = async (response) => {
+  const body = await response.text();
+  let result = null;
+
+  if (body) {
+    try {
+      result = JSON.parse(body);
+    } catch {
+      result = body;
+    }
+  }
+
+  if (!response.ok) {
+    const detail = result?.detail ?? result?.message;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((item) => item.msg || JSON.stringify(item)).join(", ")
+          : response.statusText || "The request could not be completed.";
+    throw new Error(message);
+  }
+
+  return result;
+};
+
+const sendUpdate = async (path, data) => {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return readResponse(response);
+};
+
+const optionalText = (value) => value?.trim() || null;
+
+const parseDateRange = (value) => {
+  const match = value.match(
+    /^\s*(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})\s*$/,
+  );
+  return match ? { start_date: match[1], end_date: match[2] } : null;
+};
+
+const LocationSummary = ({
+  hoveredLocationSummary,
+  onClose,
+  onMouseEnter,
+  onSummaryChange,
+  dateRangeQuery = "",
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(hoveredLocationSummary);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  if (!hoveredLocationSummary) return null;
+  const content = editing ? draft : hoveredLocationSummary;
+  if (!content) return null;
+
+  const updateLifePeriod = (lifePeriodId, key, value) => {
+    setDraft((current) => ({
+      ...current,
+      life_periods: current.life_periods.map((lifePeriod) =>
+        lifePeriod.id === lifePeriodId
+          ? { ...lifePeriod, [key]: value }
+          : lifePeriod,
+      ),
+    }));
+  };
+
+  const updateExperience = (lifePeriodId, experienceId, key, value) => {
+    setDraft((current) => ({
+      ...current,
+      life_periods: current.life_periods.map((lifePeriod) =>
+        lifePeriod.id === lifePeriodId
+          ? {
+              ...lifePeriod,
+              experiences: lifePeriod.experiences.map((experience) =>
+                experience.id === experienceId
+                  ? { ...experience, [key]: value }
+                  : experience,
+              ),
+            }
+          : lifePeriod,
+      ),
+    }));
+  };
+
+  const updateMediaAsset = (
+    lifePeriodId,
+    experienceId,
+    mediaAssetId,
+    key,
+    value,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      life_periods: current.life_periods.map((lifePeriod) =>
+        lifePeriod.id === lifePeriodId
+          ? {
+              ...lifePeriod,
+              experiences: lifePeriod.experiences.map((experience) =>
+                experience.id === experienceId
+                  ? {
+                      ...experience,
+                      media_assets: experience.media_assets.map((media) =>
+                        media.id === mediaAssetId
+                          ? { ...media, [key]: value }
+                          : media,
+                      ),
+                    }
+                  : experience,
+              ),
+            }
+          : lifePeriod,
+      ),
+    }));
+  };
+
+  const refreshSummary = async (locationId) => {
+    const query = dateRangeQuery ? `?${dateRangeQuery}` : "";
+    const response = await fetch(
+      `${API_BASE}/locations/${locationId}/summary${query}`,
+      { cache: "no-store" },
+    );
+    return readResponse(response);
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+    const dateRanges = new Map();
+    for (const lifePeriod of draft.life_periods) {
+      const dateRange = lifePeriod.date_range
+        ? parseDateRange(lifePeriod.date_range)
+        : {
+            start_date: lifePeriod.start_date,
+            end_date: lifePeriod.end_date,
+          };
+      if (!dateRange) {
+        setError(
+          `Enter the dates for "${lifePeriod.title}" as YYYY-MM-DD - YYYY-MM-DD.`,
+        );
+        return;
+      }
+      dateRanges.set(lifePeriod.id, dateRange);
+    }
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const { location, life_periods: lifePeriods } = draft;
+      await sendUpdate(`/locations/${location.id}`, {
+        city: location.city,
+        country: location.country,
+      });
+
+      for (const lifePeriod of lifePeriods) {
+        const dateRange = dateRanges.get(lifePeriod.id);
+        await sendUpdate(`/life-periods/${lifePeriod.id}`, {
+          title: lifePeriod.title,
+          description: optionalText(lifePeriod.description),
+          start_date: dateRange.start_date,
+          end_date: dateRange.end_date,
+          tag: optionalText(lifePeriod.tag),
+        });
+
+        for (const experience of lifePeriod.experiences) {
+          await sendUpdate(`/experiences/${experience.id}`, {
+            title: experience.title,
+            description: optionalText(experience.description),
+            experience_type: optionalText(experience.experience_type),
+            start_date: experience.start_date,
+            end_date: experience.end_date,
+          });
+
+          for (const media of experience.media_assets) {
+            await sendUpdate(`/media-assets/${media.id}`, {
+              title: optionalText(media.title),
+              description: optionalText(media.description),
+              file_url: media.file_url,
+              captured_at: media.captured_at || null,
+            });
+          }
+        }
+      }
+
+      const updatedSummary = await refreshSummary(location.id);
+      onSummaryChange(updatedSummary);
+      setEditing(false);
+    } catch (saveError) {
+      setError(saveError.message || "Unable to save this location summary.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (kind, id, locationId) => {
+    const confirmation =
+      kind === "life-period"
+        ? "Delete this life period and its experiences and media?"
+        : "Delete this experience and its media?";
+    if (!window.confirm(confirmation)) return;
+
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `${API_BASE}/${kind === "life-period" ? "life-periods" : "experiences"}/${id}`,
+        {
+          method: "DELETE",
+        },
+      );
+      await readResponse(response);
+      const updatedSummary = await refreshSummary(locationId);
+      onSummaryChange(updatedSummary);
+      setDraft(updatedSummary);
+    } catch (deleteError) {
+      setError(deleteError.message || "Unable to delete this item.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelEditing = () => {
+    setDraft(hoveredLocationSummary);
+    setEditing(false);
+    setError("");
+  };
+
+  const { location, life_periods: lifePeriods = [] } = content;
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-6 z-50">
+    <div
+      className="pointer-events-auto absolute right-4 top-6 z-50"
+      onMouseEnter={onMouseEnter}
+    >
       <img
         src="/tape.png"
         alt=""
@@ -29,11 +292,11 @@ const LocationSummary = ({ hoveredLocationSummary, onClose }) => {
         className="pointer-events-none absolute left-1/2 top-[-30px] z-20 h-fit -translate-x-1/2 object-contain opacity-90"
       />
       <div
-        className="relative h-105 w-105 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-[#d99a9f] bg-[#fff8f5] text-[#211b1b] shadow-[8px_10px_0_rgba(105,40,48,0.16),0_20px_35px_rgba(52,36,17,0.2)]"
+        className="relative h-105 w-105 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-[#d99a9f] bg-[#fff8f5] shadow-[8px_10px_0_rgba(105,40,48,0.16),0_20px_35px_rgba(52,36,17,0.2)]"
         style={{
           backgroundImage:
             "linear-gradient(rgba(202,91,106,0.22) 1px, transparent 1px), linear-gradient(90deg, rgba(202,91,106,0.08) 1px, transparent 1px)",
-          backgroundSize: "100% 28px, 28px 100%",
+          backgroundSize: "100% 20px, 20px 100%",
         }}
       >
         <div className="pointer-events-none absolute inset-0 bg-[rgba(255,250,248,0.34)]" />
@@ -47,127 +310,431 @@ const LocationSummary = ({ hoveredLocationSummary, onClose }) => {
           ×
         </button>
 
-        <div className="relative z-10 flex h-full flex-col px-7 py-6">
-          <div className="border-b-2 border-dashed border-[#9e4d58]/55 pb-4 pr-10">
-            <h2 className="mt-2 font-ribbon text-[2rem] font-bold leading-[0.82] tracking-tight text-[#301c20]">
+        <form
+          onSubmit={handleSave}
+          className="relative flex h-full flex-col px-7 py-6"
+        >
+          <div className="flex items-start justify-between gap-2 border-b-2 border-dashed border-[#9e4d58]/55 pb-4 pr-10">
+            <h2 className="min-w-0 flex-1 font-alegreya text-[2rem] font-bold leading-[0.82] tracking-tight">
               {location?.city || "Unknown city"},{" "}
               {location?.country || "Unknown country"}
             </h2>
+            {editing ? (
+              <div className="absolute right-14 top-4 z-20 flex gap-1">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={cancelEditing}
+                  className="rounded border border-[#8d4650]/35 bg-white/90 px-2 py-1 text-xs font-bold text-[#71353e] disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="rounded bg-[#71353e] px-2 py-1 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  {busy ? "Saving..." : "Save"}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(hoveredLocationSummary);
+                  setError("");
+                  setEditing(true);
+                }}
+                aria-label="Edit location summary"
+                title="Edit location summary"
+                className="absolute right-14 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[#8d4650]/35 bg-[#fff8f5]/90 text-[#71353e] shadow-sm transition hover:bg-white"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  className="h-4 w-4"
+                >
+                  <path
+                    d="m13.9 3.6 2.5 2.5M4 16l3.2-.7L16 6.5a1.8 1.8 0 0 0-2.5-2.5L4.7 12.8 4 16Z"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.6"
+                  />
+                </svg>
+              </button>
+            )}
           </div>
 
-          <div className="mt-5 min-h-0 flex-1 space-y-5 overflow-y-auto pr-2">
-            {life_periods.map(
-              (
-                {
-                  id,
-                  title,
-                  description,
-                  start_date,
-                  end_date,
-                  tag,
-                  experiences = [],
-                },
-                lifeIndex,
-              ) => (
+          {error ? (
+            <p role="alert" className="mt-2 text-xs font-semibold text-red-700">
+              {error}
+            </p>
+          ) : null}
+
+          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
+            {lifePeriods.map((lifePeriod, lifeIndex) => {
+              const originalLifePeriod =
+                hoveredLocationSummary.life_periods.find(
+                  (original) => original.id === lifePeriod.id,
+                );
+              return (
                 <section
-                  key={`life-period-${id}`}
-                  className="relative border-l-2 border-[#70816c]/65 pl-4"
+                  key={`life-period-${lifePeriod.id}`}
+                  className="font-roboto-slab"
                 >
-                  <span className="absolute -left-1.75 top-1 h-3 w-3 rounded-full border-2 border-[#f8f7ed] bg-[#6e876d]" />
                   <div className="flex items-start justify-between gap-2">
-                    <h3
-                      className={`inline-block -rotate-1 px-2 py-1 font-ribbon text-[1.35rem] font-bold leading-none text-[#26382d] ${markerColors[lifeIndex % markerColors.length]}`}
+                    <div
+                      className={`min-w-0 flex-1 -rotate-1 text-xl font-bold leading-none ${
+                        markerColors[lifeIndex % markerColors.length]
+                      }`}
                     >
-                      {title || "Untitled life period"}
-                    </h3>
-                    {tag ? (
-                      <span className="mt-1 shrink-0 border-b-2 border-[#6b806a]/50 px-1 font-sans text-[9px] font-bold uppercase tracking-[0.12em] text-[#62735f]">
-                        {tag}
-                      </span>
+                      <span aria-hidden="true">• </span>
+                      <textarea
+                        aria-label="Life period title"
+                        className="flex-1 min-w-0 resize-none p-0 m-0 alignment-baseline bg-transparent text-inherit outline-none placeholder:text-current/60 focus:ring-1 focus:ring-[#9e4d58]/40 [field-sizing:content] [scrollbar-width:none]"
+                        onChange={(event) =>
+                          updateLifePeriod(
+                            lifePeriod.id,
+                            "title",
+                            event.target.value,
+                          )
+                        }
+                        placeholder="Untitled life period"
+                        readOnly={!editing}
+                        type="text"
+                        value={lifePeriod.title ?? ""}
+                      />
+                      {originalLifePeriod?.tag ? (
+                        <input
+                          aria-label="Life period tag"
+                          className={`flex-1 min-w-0 w-auto border-b-2 border-[#6b806a]/50 bg-transparent px-1 font-sans text-[9px] text-right font-bold uppercase tracking-[0.12em] outline-none focus:border-[#9e4d58] ${textColors[0]}`}
+                          onChange={(event) =>
+                            updateLifePeriod(
+                              lifePeriod.id,
+                              "tag",
+                              event.target.value,
+                            )
+                          }
+                          readOnly={!editing}
+                          type="text"
+                          value={lifePeriod.tag}
+                        />
+                      ) : null}
+                    </div>
+                    {editing ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          handleDelete(
+                            "life-period",
+                            lifePeriod.id,
+                            location.id,
+                          )
+                        }
+                        aria-label={`Delete life period ${lifePeriod.title}`}
+                        className="shrink-0 rounded-full bg-[#71353e] px-2 text-sm font-bold text-white disabled:opacity-50"
+                      >
+                        ×
+                      </button>
                     ) : null}
                   </div>
 
-                  <p className="mt-2 font-sans text-[9px] font-semibold uppercase tracking-[0.13em] text-[#62735f]">
-                    {formatDateRange(start_date, end_date)}
-                  </p>
-                  <p className="mt-1 font-ribbon text-[1.02rem] leading-[1.2] text-[#3d4b40]">
-                    {description || "No description available."}
-                  </p>
+                  <div className="relative pl-4 before:absolute before:left-0 before:top-2 before:h-[calc(100%-0.5rem)] before:w-[2px] before:bg-[#9e4d58]/45">
+                    <div className="space-y-2">
+                      <input
+                        aria-label="Life period dates"
+                        className={`w-full p-0 m-0 alignment-baseline bg-transparent font-caveat text-lg font-bold outline-none focus:ring-1 focus:ring-[#9e4d58]/40 ${textColors[0]}`}
+                        onChange={(event) =>
+                          updateLifePeriod(
+                            lifePeriod.id,
+                            "date_range",
+                            event.target.value,
+                          )
+                        }
+                        readOnly={!editing}
+                        type="text"
+                        value={
+                          lifePeriod.date_range ??
+                          formatDateRange(
+                            lifePeriod.start_date,
+                            lifePeriod.end_date,
+                          )
+                        }
+                      />
 
-                  {experiences.length > 0 ? (
-                    <div className="mt-3 space-y-3">
-                      {experiences.map(
-                        ({
-                          id: experienceId,
-                          title: experienceTitle,
-                          description: experienceDescription,
-                          experience_type,
-                          start_date: experienceStart,
-                          end_date: experienceEnd,
-                          media_assets = [],
-                        }) => (
-                          <article
-                            key={`experience-${experienceId}`}
-                            className="border-t border-[#789078]/40 pt-2"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div>
-                                <p className="font-sans text-[9px] font-bold uppercase tracking-[0.12em] text-[#718170]">
-                                  {formatDateRange(
-                                    experienceStart,
-                                    experienceEnd,
+                      {originalLifePeriod?.description ? (
+                        <textarea
+                          aria-label="Life period description"
+                          className={`w-full resize-none bg-transparent text-base leading-[1.2] outline-none focus:ring-1 [field-sizing:content] [scrollbar-width:none] focus:ring-[#9e4d58]/40 ${textColors[1]}`}
+                          onChange={(event) =>
+                            updateLifePeriod(
+                              lifePeriod.id,
+                              "description",
+                              event.target.value,
+                            )
+                          }
+                          readOnly={!editing}
+                          rows={2}
+                          value={lifePeriod.description}
+                        />
+                      ) : null}
+
+                      {lifePeriod.experiences.length > 0 ? (
+                        <div className="mt-3 space-y-3">
+                          {lifePeriod.experiences.map((experience) => (
+                            <article
+                              key={`experience-${experience.id}`}
+                              className="border-t border-[#789078]/40 pt-2"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  {editing ? (
+                                    <EditableValue
+                                      editing
+                                      value={experience.title}
+                                      onChange={(value) =>
+                                        updateExperience(
+                                          lifePeriod.id,
+                                          experience.id,
+                                          "title",
+                                          value,
+                                        )
+                                      }
+                                      label="Experience title"
+                                      className="text-lg font-bold"
+                                    />
+                                  ) : (
+                                    <h4 className="text-lg font-bold leading-none">
+                                      {experience.title ||
+                                        "Untitled experience"}
+                                    </h4>
                                   )}
-                                </p>
-                                <h4 className="mt-1 font-ribbon text-[1.18rem] font-bold leading-none text-[#26382d]">
-                                  {experienceTitle || "Untitled experience"}
-                                </h4>
+                                </div>
+                                {editing ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      handleDelete(
+                                        "experience",
+                                        experience.id,
+                                        location.id,
+                                      )
+                                    }
+                                    aria-label={`Delete experience ${experience.title}`}
+                                    className="shrink-0 rounded-full bg-[#71353e] px-2 text-sm font-bold text-white disabled:opacity-50"
+                                  >
+                                    ×
+                                  </button>
+                                ) : null}
                               </div>
-                              <span className="mt-1 shrink-0 font-sans text-[8px] font-bold uppercase tracking-[0.12em] text-[#718170]">
-                                {experience_type || "Experience"}
-                              </span>
-                            </div>
-                            {experienceDescription ? (
-                              <p className="mt-1 font-ribbon text-[0.92rem] leading-tight text-[#526653]">
-                                {experienceDescription}
-                              </p>
-                            ) : null}
-                            {media_assets.length > 0 ? (
-                              <div className="mt-3 flex flex-wrap gap-3">
-                                {media_assets.map(
-                                  ({
-                                    id: mediaId,
-                                    title: mediaTitle,
-                                    file_url,
-                                  }) => (
-                                    <figure
-                                      key={`media-asset-${mediaId}`}
-                                      className="w-26 -rotate-2 bg-white p-1.5 pb-5 shadow-[1px_3px_5px_rgba(42,55,42,0.2)] even:rotate-2"
-                                    >
-                                      <img
-                                        src={file_url}
-                                        alt={mediaTitle || "Travel memory"}
-                                        className="aspect-square w-full object-cover"
+                              {editing ? (
+                                <>
+                                  <label className="mt-1 block text-xs text-[#307b9c]">
+                                    Type
+                                    <EditableValue
+                                      editing
+                                      value={experience.experience_type}
+                                      onChange={(value) =>
+                                        updateExperience(
+                                          lifePeriod.id,
+                                          experience.id,
+                                          "experience_type",
+                                          value,
+                                        )
+                                      }
+                                      label="Experience type"
+                                    />
+                                  </label>
+                                  <div className="mt-1 grid grid-cols-2 gap-2">
+                                    <label className="text-xs text-[#307b9c]">
+                                      Start date
+                                      <EditableValue
+                                        editing
+                                        type="date"
+                                        value={experience.start_date}
+                                        onChange={(value) =>
+                                          updateExperience(
+                                            lifePeriod.id,
+                                            experience.id,
+                                            "start_date",
+                                            value,
+                                          )
+                                        }
+                                        label="Experience start date"
                                       />
-                                      {mediaTitle ? (
-                                        <figcaption className="mt-1 truncate text-center font-ribbon text-[0.8rem] text-[#526653]">
-                                          {mediaTitle}
-                                        </figcaption>
-                                      ) : null}
-                                    </figure>
-                                  ),
-                                )}
-                              </div>
-                            ) : null}
-                          </article>
-                        ),
-                      )}
+                                    </label>
+                                    <label className="text-xs text-[#307b9c]">
+                                      End date
+                                      <EditableValue
+                                        editing
+                                        type="date"
+                                        value={experience.end_date}
+                                        onChange={(value) =>
+                                          updateExperience(
+                                            lifePeriod.id,
+                                            experience.id,
+                                            "end_date",
+                                            value,
+                                          )
+                                        }
+                                        label="Experience end date"
+                                      />
+                                    </label>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <p
+                                    className={`mt-0.5 font-caveat text-base font-bold ${textColors[0]}`}
+                                  >
+                                    {formatDateRange(
+                                      experience.start_date,
+                                      experience.end_date,
+                                    )}
+                                  </p>
+                                  {experience.experience_type ? (
+                                    <p
+                                      className={`mt-1 font-sans text-[8px] font-bold uppercase tracking-[0.12em] ${textColors[0]}`}
+                                    >
+                                      # {experience.experience_type}
+                                    </p>
+                                  ) : null}
+                                </>
+                              )}
+                              {editing ? (
+                                <EditableValue
+                                  editing
+                                  value={experience.description}
+                                  onChange={(value) =>
+                                    updateExperience(
+                                      lifePeriod.id,
+                                      experience.id,
+                                      "description",
+                                      value,
+                                    )
+                                  }
+                                  label="Experience description"
+                                  multiline
+                                  className={`mt-1 text-sm ${textColors[1]}`}
+                                />
+                              ) : experience.description ? (
+                                <p
+                                  className={`mt-0.5 text-sm leading-tight ${textColors[1]}`}
+                                >
+                                  {experience.description}
+                                </p>
+                              ) : null}
+
+                              {experience.media_assets?.length > 0 ? (
+                                <div className="mt-3 space-y-2">
+                                  {experience.media_assets.map((media) => (
+                                    <div
+                                      key={`media-asset-${media.id}`}
+                                      className="flex items-start gap-2"
+                                    >
+                                      <figure className="w-26 shrink-0 -rotate-2 bg-white p-1.5 pb-5 shadow-[1px_3px_5px_rgba(42,55,42,0.2)]">
+                                        <img
+                                          src={media.file_url}
+                                          alt={media.title || "Travel memory"}
+                                          className="aspect-square w-full object-cover"
+                                        />
+                                      </figure>
+                                      {editing ? (
+                                        <div className="min-w-0 flex-1 space-y-1">
+                                          <EditableValue
+                                            editing
+                                            value={media.title}
+                                            onChange={(value) =>
+                                              updateMediaAsset(
+                                                lifePeriod.id,
+                                                experience.id,
+                                                media.id,
+                                                "title",
+                                                value,
+                                              )
+                                            }
+                                            label="Media title"
+                                          />
+                                          <EditableValue
+                                            editing
+                                            value={media.file_url}
+                                            onChange={(value) =>
+                                              updateMediaAsset(
+                                                lifePeriod.id,
+                                                experience.id,
+                                                media.id,
+                                                "file_url",
+                                                value,
+                                              )
+                                            }
+                                            label="Media file URL"
+                                          />
+                                          <EditableValue
+                                            editing
+                                            value={media.description}
+                                            onChange={(value) =>
+                                              updateMediaAsset(
+                                                lifePeriod.id,
+                                                experience.id,
+                                                media.id,
+                                                "description",
+                                                value,
+                                              )
+                                            }
+                                            label="Media description"
+                                            multiline
+                                          />
+                                          <EditableValue
+                                            editing
+                                            type="date"
+                                            value={media.captured_at}
+                                            onChange={(value) =>
+                                              updateMediaAsset(
+                                                lifePeriod.id,
+                                                experience.id,
+                                                media.id,
+                                                "captured_at",
+                                                value,
+                                              )
+                                            }
+                                            label="Media capture date"
+                                          />
+                                        </div>
+                                      ) : (
+                                        <div className="min-w-0">
+                                          {media.title ? (
+                                            <p className="text-sm font-bold">
+                                              {media.title}
+                                            </p>
+                                          ) : null}
+                                          {media.description ? (
+                                            <p
+                                              className={`text-sm ${textColors[1]}`}
+                                            >
+                                              {media.description}
+                                            </p>
+                                          ) : null}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
+                  </div>
                 </section>
-              ),
-            )}
+              );
+            })}
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

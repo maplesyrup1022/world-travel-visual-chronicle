@@ -5,8 +5,7 @@ import React, { useState } from "react";
 
 const MIN_YEAR = 2016;
 const CURRENT_YEAR = new Date().getFullYear();
-const today = new Date();
-const MAX_DATE = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+const MAX_DATE = new Date();
 const MIN_DATE = `${MIN_YEAR}-01-01`;
 
 const dateForYear = (year, endOfYear = false) => {
@@ -61,9 +60,9 @@ export default function Timeline({ onDateRangeChange }) {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <p className="font-ribbon text-xl font-bold leading-none text-white">
-              YEAR {selectedYear}
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-caveat text-xl font-bold leading-none text-white">
+              YEAR <span className="text-2xl">{selectedYear}</span>
             </p>
             <Link
               href="/chronicle"
@@ -74,7 +73,7 @@ export default function Timeline({ onDateRangeChange }) {
           </div>
 
           <div className="relative h-8 px-1">
-            <div className="absolute left-1 right-1 top-3 h-1.5 rounded-full bg-gray-100" />
+            <div className="mt-1 absolute left-1 right-1 top-3 h-2 rounded-full bg-gray-100" />
             <input
               aria-label="Choose year"
               type="range"
@@ -87,7 +86,7 @@ export default function Timeline({ onDateRangeChange }) {
             />
           </div>
 
-          <div className="mb-2 flex justify-between font-sans text-[10px] font-semibold text-gray-300">
+          <div className="mb-1 flex justify-between font-caveat text-sm font-bold text-gray-300 -translate-y-1">
             <span>{MIN_YEAR}</span>
             <span className="text-white">{selectedYear}</span>
             <span>{CURRENT_YEAR}</span>
@@ -102,7 +101,7 @@ export default function Timeline({ onDateRangeChange }) {
                 max={endDate}
                 value={startDate}
                 onChange={(event) => updateStartDate(event.target.value)}
-                className="timeline-date-input rounded border border-white/30 bg-white/10 px-1.5 py-1 text-[10px] font-medium normal-case tracking-normal text-gray-100"
+                className="timeline-date-input rounded border border-white/30 bg-white/10 px-1.5 py-1 text-sm font-medium font-caveat normal-case tracking-normal text-gray-100"
               />
             </label>
             <label className="flex items-center gap-2">
@@ -113,7 +112,7 @@ export default function Timeline({ onDateRangeChange }) {
                 max={MAX_DATE}
                 value={endDate}
                 onChange={(event) => updateEndDate(event.target.value)}
-                className="timeline-date-input rounded border border-white/30 bg-white/10 px-1.5 py-1 text-[10px] font-medium normal-case tracking-normal text-gray-100"
+                className="timeline-date-input rounded border border-white/30 bg-white/10 px-1.5 py-1 text-sm font-medium font-caveat normal-case tracking-normal text-gray-100"
               />
             </label>
           </div>

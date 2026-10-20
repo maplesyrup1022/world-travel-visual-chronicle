@@ -3,7 +3,6 @@ from typing import Optional
 
 import piexif
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Query, Session as SASession
 from PIL import Image
 
@@ -190,16 +189,14 @@ def get_all_life_periods_query(
 ) -> Query:
     query = db.query(LifePeriod).filter(LifePeriod.user_id == user_id)
     if year is not None:
-        query = query.filter(or_(
-                             and_(LifePeriod.end_date <= date(year, 12, 31),
-                                  LifePeriod.end_date >= date(year, 1, 1)),
-                             and_(LifePeriod.start_date >= date(year, 1, 1),
-                                  LifePeriod.start_date <= date(year, 12, 31))
-                             ))
+        query = query.filter(
+            LifePeriod.start_date <= date(year, 12, 31),
+            LifePeriod.end_date >= date(year, 1, 1),
+        )
     if start_date is not None:
-        query = query.filter(LifePeriod.start_date >= start_date)
+        query = query.filter(LifePeriod.end_date >= start_date)
     if end_date is not None:
-        query = query.filter(LifePeriod.end_date <= end_date)
+        query = query.filter(LifePeriod.start_date <= end_date)
     if location_id is not None:
         query = query.filter(LifePeriod.location_id == location_id)
     return query.order_by(LifePeriod.start_date)
@@ -220,16 +217,14 @@ def get_all_experiences_query(
         Experience.life_period_id == life_period_id,
     )
     if year is not None:
-        query = query.filter(or_(
-                             and_(Experience.end_date <= date(year, 12, 31),
-                                  Experience.end_date >= date(year, 1, 1)),
-                             and_(Experience.start_date >= date(year, 1, 1),
-                                  Experience.start_date <= date(year, 12, 31))
-                             ))
+        query = query.filter(
+            Experience.start_date <= date(year, 12, 31),
+            Experience.end_date >= date(year, 1, 1),
+        )
     if start_date is not None:
-        query = query.filter(Experience.start_date >= start_date)
+        query = query.filter(Experience.end_date >= start_date)
     if end_date is not None:
-        query = query.filter(Experience.end_date <= end_date)
+        query = query.filter(Experience.start_date <= end_date)
     if location_id is not None:
         query = query.filter(Experience.location_id == location_id)
     query = query.order_by(Experience.start_date)
