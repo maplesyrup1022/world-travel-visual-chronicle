@@ -92,8 +92,8 @@ class Experience(Base):
 
     location_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("locations.id"), nullable=True)
-    life_period_id: Mapped[int] = mapped_column(
-        ForeignKey("life_periods.id"), nullable=False)
+    life_period_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("life_periods.id"), nullable=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False)
 

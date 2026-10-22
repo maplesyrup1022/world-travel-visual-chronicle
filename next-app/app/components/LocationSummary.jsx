@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import {
+  formatDateInput,
+  formatDateRangeInput,
+  parseDateInput,
+  parseDateRangeInput,
+} from "./dateInput";
 
 const API_BASE = "http://127.0.0.1:8000";
-
-const formatDateRange = (startDate, endDate) => {
-  if (!startDate && !endDate) return "Date unknown";
-  if (startDate && endDate) return `${startDate} - ${endDate}`;
-  return startDate || endDate;
-};
 
 const markerColors = [
   "bg-[#FFCAD4]",
@@ -84,13 +84,6 @@ const sendUpdate = async (path, data) => {
 
 const optionalText = (value) => value?.trim() || null;
 
-const parseDateRange = (value) => {
-  const match = value.match(
-    /^\s*(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})\s*$/,
-  );
-  return match ? { start_date: match[1], end_date: match[2] } : null;
-};
-
 const LocationSummary = ({
   hoveredLocationSummary,
   onClose,
@@ -102,6 +95,8 @@ const LocationSummary = ({
   const [draft, setDraft] = useState(hoveredLocationSummary);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notePosition, setNotePosition] = useState({ x: 0, y: 0 });
+  const dragStartRef = useRef(null);
 
   if (!hoveredLocationSummary) return null;
   const content = editing ? draft : hoveredLocationSummary;
@@ -181,14 +176,14 @@ const LocationSummary = ({
     const dateRanges = new Map();
     for (const lifePeriod of draft.life_periods) {
       const dateRange = lifePeriod.date_range
-        ? parseDateRange(lifePeriod.date_range)
+        ? parseDateRangeInput(lifePeriod.date_range)
         : {
             start_date: lifePeriod.start_date,
             end_date: lifePeriod.end_date,
           };
       if (!dateRange) {
         setError(
-          `Enter the dates for "${lifePeriod.title}" as YYYY-MM-DD - YYYY-MM-DD.`,
+          `Enter the dates for "${lifePeriod.title}" as YYYY/MM/DD - YYYY/MM/DD.`,
         );
         return;
       }
@@ -196,18 +191,27 @@ const LocationSummary = ({
 
       for (const experience of lifePeriod.experiences) {
         const experienceDateRange = experience.date_range
-          ? parseDateRange(experience.date_range)
+          ? parseDateRangeInput(experience.date_range)
           : {
               start_date: experience.start_date,
               end_date: experience.end_date,
             };
         if (!experienceDateRange) {
           setError(
-            `Enter the dates for "${experience.title}" as YYYY-MM-DD - YYYY-MM-DD.`,
+            `Enter the dates for "${experience.title}" as YYYY/MM/DD - YYYY/MM/DD.`,
           );
           return;
         }
         dateRanges.set(`experience-${experience.id}`, experienceDateRange);
+
+        for (const media of experience.media_assets) {
+          if (media.captured_at && !parseDateInput(media.captured_at)) {
+            setError(
+              `Enter the capture date for "${media.title || "this memory"}" as YYYY/MM/DD.`,
+            );
+            return;
+          }
+        }
       }
     }
 
@@ -244,7 +248,9 @@ const LocationSummary = ({
               title: optionalText(media.title),
               description: optionalText(media.description),
               file_url: media.file_url,
-              captured_at: media.captured_at || null,
+              captured_at: media.captured_at
+                ? parseDateInput(media.captured_at)
+                : null,
             });
           }
         }
@@ -295,19 +301,60 @@ const LocationSummary = ({
 
   const { location, life_periods: lifePeriods = [] } = content;
 
+  const handlePointerDown = (event) => {
+    if (
+      event.button !== 0 ||
+      event.target.closest("button, input, textarea, select, a")
+    ) {
+      return;
+    }
+
+    dragStartRef.current = {
+      pointerId: event.pointerId,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      positionX: notePosition.x,
+      positionY: notePosition.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event) => {
+    const dragStart = dragStartRef.current;
+    if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+    setNotePosition({
+      x: dragStart.positionX + event.clientX - dragStart.pointerX,
+      y: dragStart.positionY + event.clientY - dragStart.pointerY,
+    });
+  };
+
+  const finishDragging = (event) => {
+    if (dragStartRef.current?.pointerId === event.pointerId) {
+      dragStartRef.current = null;
+    }
+  };
+
   return (
     <div
-      className="pointer-events-auto absolute right-4 top-6 z-50"
+      className="pointer-events-auto absolute right-4 top-6 z-50 cursor-grab active:cursor-grabbing"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishDragging}
+      onPointerCancel={finishDragging}
       onMouseEnter={onMouseEnter}
+      style={{
+        transform: `translate(${notePosition.x}px, ${notePosition.y}px)`,
+      }}
     >
       <img
         src="/tape.png"
         alt=""
         aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-[-30px] z-20 h-fit -translate-x-1/2 object-contain opacity-90"
+        className="pointer-events-none absolute left-1/2 top-[-30px] z-20 h-fit -translate-x-1/2 object-contain opacity-80"
       />
       <div
-        className="relative h-105 w-105 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-[#d99a9f] bg-[#fff8f5] shadow-[8px_10px_0_rgba(105,40,48,0.16),0_20px_35px_rgba(52,36,17,0.2)]"
+        className="relative h-135 w-105 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-[#d99a9f] bg-[#fff8f5] shadow-[8px_10px_0_rgba(105,40,48,0.16),0_20px_35px_rgba(52,36,17,0.2)]"
         style={{
           backgroundImage:
             "linear-gradient(rgba(202,91,106,0.22) 1px, transparent 1px), linear-gradient(90deg, rgba(202,91,106,0.08) 1px, transparent 1px)",
@@ -475,7 +522,7 @@ const LocationSummary = ({
                         type="text"
                         value={
                           lifePeriod.date_range ??
-                          formatDateRange(
+                          formatDateRangeInput(
                             lifePeriod.start_date,
                             lifePeriod.end_date,
                           )
@@ -567,7 +614,7 @@ const LocationSummary = ({
                                   type="text"
                                   value={
                                     experience.date_range ??
-                                    formatDateRange(
+                                    formatDateRangeInput(
                                       experience.start_date,
                                       experience.end_date,
                                     )
@@ -672,20 +719,23 @@ const LocationSummary = ({
                                               label="Media description"
                                               multiline
                                             />
-                                            <EditableValue
-                                              editing
-                                              type="date"
-                                              value={media.captured_at}
-                                              onChange={(value) =>
+                                            <input
+                                              aria-label="Media capture date"
+                                              className={fieldClass}
+                                              inputMode="numeric"
+                                              onChange={(event) =>
                                                 updateMediaAsset(
                                                   lifePeriod.id,
                                                   experience.id,
                                                   media.id,
                                                   "captured_at",
-                                                  value,
+                                                  event.target.value,
                                                 )
                                               }
-                                              label="Media capture date"
+                                              placeholder="YYYY/MM/DD"
+                                              value={formatDateInput(
+                                                media.captured_at,
+                                              )}
                                             />
                                           </div>
                                         ) : (

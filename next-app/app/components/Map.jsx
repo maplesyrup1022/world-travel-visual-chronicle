@@ -92,6 +92,9 @@ const Map = ({ visitedLocations }) => {
   // Instead, the parent must pass down a function (callback) as a prop. When the child calls this function,
   // it triggers the state change back up in the parent.
   // Never try to mutate props directly. Props are strictly read-only.
+
+  // If I want to refetch data from backend when something on the page has changed, event-driven refetching is to define a event handler func after a specific user action, and refetch the data inside the func, set the state to new data and let react auto rerender the new data
+  // State-Driven Declarative Refetching (useEffect) A useEffect hook listens to the states in the dependency array and handles the refetching automatically whenever it changes.
   const handleDateRangeChange = async ({ startDate, endDate, year }) => {
     const requestId = ++dateRangeRequestRef.current;
     ++summaryRequestRef.current;

@@ -8,6 +8,8 @@ const formatDateRange = (startDate, endDate) => {
   return startDate || endDate;
 };
 
+const formatDate = (value) => new Date(value).toLocaleDateString();
+
 const metrics = [
   { key: "life_periods", label: "Life periods", color: "#d9a94f" },
   { key: "experiences", label: "Experiences", color: "#d98689" },
@@ -18,6 +20,12 @@ const metrics = [
 
 const Chronicle = ({ chronicle = [], stats = {}, year }) => {
   const totalMemories = Number(stats.media_assets) || 0;
+  const lifePeriods = Array.isArray(chronicle)
+    ? chronicle
+    : chronicle.life_periods || [];
+  const standaloneExperiences = Array.isArray(chronicle)
+    ? []
+    : chronicle.standalone_experiences || [];
 
   return (
     <main className="min-h-screen bg-[#e4e4e1] px-10 py-8 text-[#303a32] sm:px-70 sm:py-12">
@@ -48,9 +56,9 @@ const Chronicle = ({ chronicle = [], stats = {}, year }) => {
           </header>
 
           <section aria-labelledby="timeline-heading" className="pb-8 pt-2">
-            {chronicle.length ? (
+            {lifePeriods.length || standaloneExperiences.length ? (
               <div className="relative ml-2 border-l-2 border-[#8ca18a]/65 pl-6 sm:ml-5 sm:pl-9">
-                {chronicle.map(
+                {lifePeriods.map(
                   (
                     {
                       id,
@@ -151,13 +159,65 @@ const Chronicle = ({ chronicle = [], stats = {}, year }) => {
                             No experiences recorded in this chapter.
                           </p>
                         )}
-                        {periodIndex < chronicle.length - 1 ? (
+                        {periodIndex < lifePeriods.length - 1 ||
+                        standaloneExperiences.length ? (
                           <div className="mt-8 border-b border-dotted border-[#aeb8a5]/75" />
                         ) : null}
                       </article>
                     );
                   },
                 )}
+                {standaloneExperiences.map((experience, index) => (
+                  <article
+                    key={`standalone-experience-${experience.id}`}
+                    className="relative pb-9 last:pb-0"
+                  >
+                    <span className="absolute -left-8.5 top-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-[#fbfaf1] bg-[#d28c86] shadow-[0_0_0_1px_rgba(210,140,134,0.35)] sm:-left-11.5" />
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <h3 className="font-roboto-slab text-2xl font-bold text-[#39483c]">
+                        {experience.title || "Untitled experience"}
+                      </h3>
+                      <span className="font-caveat text-lg font-semibold text-[#89907e]">
+                        {formatDateRange(
+                          experience.start_date,
+                          experience.end_date,
+                        )}
+                      </span>
+                    </div>
+                    {experience.experience_type ? (
+                      <span className="mt-1 inline-block bg-[#d9e5d3]/80 px-2 py-0.5 font-sans text-[8px] font-bold uppercase tracking-[0.14em] text-[#5c765e]">
+                        # {experience.experience_type}
+                      </span>
+                    ) : null}
+                    {experience.description ? (
+                      <p className="mt-1 max-w-3xl font-roboto-slab text-[0.98rem] leading-relaxed text-[#687568]">
+                        {experience.description}
+                      </p>
+                    ) : null}
+                    {experience.media_assets?.length ? (
+                      <div className="mt-3 flex flex-wrap gap-4">
+                        {experience.media_assets.map((media) => (
+                          <figure
+                            key={`standalone-media-${media.id}`}
+                            className={`w-32 bg-white p-2 pb-5 shadow-[1px_4px_8px_rgba(51,62,48,0.17)] ${index % 2 ? "rotate-2" : "-rotate-2"}`}
+                          >
+                            <img
+                              src={media.file_url}
+                              alt={media.title || "Travel memory"}
+                              className="aspect-square w-full object-cover"
+                            />
+                            <figcaption className="mt-1 truncate text-center font-ribbon text-sm text-[#657266]">
+                              {media.title ||
+                                (media.captured_at
+                                  ? formatDate(media.captured_at)
+                                  : "A small memory")}
+                            </figcaption>
+                          </figure>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
               </div>
             ) : (
               <p className="border-l-2 border-[#8ca18a]/65 py-3 pl-5 font-ribbon text-lg italic text-[#89907e]">

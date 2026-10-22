@@ -79,11 +79,3 @@ body {
   pointer-events: auto;
   cursor: grab;
 }
-
-.timeline-date-input {
-  color-scheme: dark;
-}
-
-.timeline-date-input::-webkit-calendar-picker-indicator {
-  opacity: 0.75;
-}

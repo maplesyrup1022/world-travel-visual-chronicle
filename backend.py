@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session as SASession
@@ -10,6 +10,7 @@ from api_schema import (
     ExperienceCreate,
     ExperienceResponse,
     ExperienceUpdate,
+    ChronicleResponse,
     LifePeriodCreate,
     LifePeriodResponse,
     LifePeriodUpdate,
@@ -32,12 +33,13 @@ from db_init import Experience, LifePeriod, Location, MediaAsset, User
 from service import (
     check_unique_experience_title,
     check_unique_life_period_title,
-    check_unique_location_city_country_pair,
+    create_location_if_not_exists,
     check_unique_media_asset_title,
     check_unique_user_username,
     extract_image_metadata,
     get_current_user,
     get_db,
+    get_all_experiences_under_certain_life_period_query,
     get_all_experiences_query,
     get_all_life_periods_query,
     get_all_media_assets_query,
@@ -126,15 +128,13 @@ def delete_user(db: SASession = Depends(get_db)):
 # Location routes. A city-country pair is unique in the database.
 
 
-@api.post("/locations", response_model=LocationResponse)
+"""@api.post("/locations", response_model=LocationResponse)
 def create_location(location: LocationCreate, db: SASession = Depends(get_db)):
-    check_unique_location_city_country_pair(
-        location.city, location.country, db)
     new_location = Location(**location.model_dump())
     db.add(new_location)
     db.commit()
     db.refresh(new_location)
-    return new_location
+    return new_location"""
 
 
 @api.get("/locations", response_model=List[LocationResponse])
@@ -179,9 +179,9 @@ def get_location_summary(
         user.id, db, year, start_date, end_date, location_id).all()
     summary_life_periods = []
     for life_period in life_periods:
-        experiences = get_all_experiences_query(
+        experiences = get_all_experiences_under_certain_life_period_query(
             user.id, life_period.id, db, None, None, None,
-            experience_limit, location_id).all()
+            experience_limit, None).all()
         summary_experiences = []
         for experience in experiences:
             media_assets = get_all_media_assets_query(
@@ -206,6 +206,7 @@ def get_location_summary(
     )
 
 
+'''
 @api.put("/locations/{location_id}", response_model=LocationResponse)
 def update_location(
     location_id: int,
@@ -213,17 +214,12 @@ def update_location(
     db: SASession = Depends(get_db),
 ):
     location = get_location(location_id, db)
-    check_unique_location_city_country_pair(
-        location_update.city if location_update.city is not None else location.city,
-        location_update.country if location_update.country is not None else location.country,
-        db,
-        location.id,
-    )
     for key, value in location_update.model_dump(exclude_unset=True).items():
         setattr(location, key, value)
     db.commit()
     db.refresh(location)
     return location
+'''
 
 
 @api.delete("/locations/{location_id}")
@@ -240,9 +236,14 @@ def delete_location(location_id: int, db: SASession = Depends(get_db)):
 @api.post("/life-periods", response_model=LifePeriodResponse)
 def create_life_period(data: LifePeriodCreate, db: SASession = Depends(get_db)):
     user = get_current_user(db)
-    get_location(data.location_id, db)
     check_unique_life_period_title(user.id, data.title, db)
-    life_period = LifePeriod(**data.model_dump(), user_id=user.id)
+    location = create_location_if_not_exists(data.location, db)
+    life_period_data = data.model_dump(exclude={"location"})
+    life_period = LifePeriod(
+        **life_period_data,
+        user_id=user.id,
+        location_id=location.id,
+    )
     db.add(life_period)
     db.commit()
     db.refresh(life_period)
@@ -255,11 +256,14 @@ def get_all_life_periods(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     location_id: Optional[int] = None,
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
     db: SASession = Depends(get_db),
 ):
     user = get_current_user(db)
     return get_all_life_periods_query(
-        user.id, db, year, start_date, end_date, location_id).all()
+        user.id, db, year, start_date, end_date, location_id, search, limit
+    ).all()
 
 
 @api.get("/life-periods/{life_period_id}", response_model=LifePeriodResponse)
@@ -304,26 +308,32 @@ def delete_life_period(life_period_id: int, db: SASession = Depends(get_db)):
 # Experience routes. An Experience is a concrete activity inside a LifePeriod.
 
 
-@api.post("/life-periods/{life_period_id}/experiences", response_model=ExperienceResponse)
+@api.post("/experiences", response_model=ExperienceResponse)
 def create_experience(
-    life_period_id: int,
     data: ExperienceCreate,
     db: SASession = Depends(get_db),
 ):
     user = get_current_user(db)
-    get_life_period(user.id, life_period_id, db)
-    if data.location_id is not None:
-        get_location(data.location_id, db)
     check_unique_experience_title(user.id, data.title, db)
-    experience = Experience(
-        **data.model_dump(),
-        life_period_id=life_period_id,
-        user_id=user.id,
-    )
-    db.add(experience)
-    db.commit()
-    db.refresh(experience)
-    return experience
+    if data.life_period_id is not None:
+        get_life_period(user.id, data.life_period_id, db)
+    location = create_location_if_not_exists(data.location, db) if data.location is not None else None
+    try:
+        experience_data = data.model_dump(
+            exclude={"location"}
+        )
+        experience = Experience(
+            **experience_data,
+            location_id=location.id if location else None,
+            user_id=user.id,
+        )
+        db.add(experience)
+        db.commit()
+        db.refresh(experience)
+        return experience
+    except Exception:
+        db.rollback()
+        raise
 
 
 @api.get("/life-periods/{life_period_id}/experiences", response_model=List[ExperienceResponse])
@@ -338,7 +348,7 @@ def get_all_experiences(
 ):
     user = get_current_user(db)
     get_life_period(user.id, life_period_id, db)
-    return get_all_experiences_query(
+    return get_all_experiences_under_certain_life_period_query(
         user.id, life_period_id, db, year, start_date, end_date,
         experience_limit, location_id).all()
 
@@ -459,7 +469,7 @@ def delete_media_asset(media_asset_id: int, db: SASession = Depends(get_db)):
     return {"message": "Media asset deleted successfully"}
 
 
-@api.get("/chronicle", response_model=List[SummaryLifePeriodResponse])
+@api.get("/chronicle", response_model=ChronicleResponse)
 def get_chronicle(db: SASession = Depends(get_db), year: Optional[int] = None,
                  start_date: Optional[date] = None, end_date: Optional[date] = None,
                  experience_limit: Optional[int] = None,
@@ -469,7 +479,7 @@ def get_chronicle(db: SASession = Depends(get_db), year: Optional[int] = None,
         user.id, db, year, start_date, end_date).all()
     summary_life_periods = []
     for life_period in life_periods:
-        experiences = get_all_experiences_query(
+        experiences = get_all_experiences_under_certain_life_period_query(
             user.id, life_period.id, db, year, start_date, end_date,
             experience_limit).all()
         summary_experiences = []
@@ -490,7 +500,39 @@ def get_chronicle(db: SASession = Depends(get_db), year: Optional[int] = None,
         summary_life_period.experiences = summary_experiences
         summary_life_periods.append(summary_life_period)
 
-    return summary_life_periods
+    standalone_experiences = get_all_experiences_query(
+        user.id,
+        db,
+        year,
+        start_date,
+        end_date,
+        experience_limit,
+        exclude=True,
+    ).all()
+    summary_standalone_experiences = []
+    for experience in standalone_experiences:
+        media_assets = get_all_media_assets_query(
+            user.id,
+            experience.id,
+            db,
+            year,
+            start_date,
+            end_date,
+            media_asset_limit,
+        ).all()
+        summary_experience = SummaryExperienceResponse.model_validate(
+            experience
+        )
+        summary_experience.media_assets = [
+            MediaAssetResponse.model_validate(media)
+            for media in media_assets
+        ]
+        summary_standalone_experiences.append(summary_experience)
+
+    return ChronicleResponse(
+        life_periods=summary_life_periods,
+        standalone_experiences=summary_standalone_experiences,
+    )
 
 
 @api.get("/chronicle/stats", response_model=StatsResponse)
@@ -504,7 +546,7 @@ def get_chronicle_stats(db: SASession = Depends(get_db), year: Optional[int] = N
     count_media_assets = 0
     experience_type_agg_dict = {}
     for life_period in life_periods:
-        experiences = get_all_experiences_query(
+        experiences = get_all_experiences_under_certain_life_period_query(
             user.id, life_period.id, db, year, start_date, end_date).all()
         count_experiences += len(experiences)
         for experience in experiences:
@@ -512,6 +554,28 @@ def get_chronicle_stats(db: SASession = Depends(get_db), year: Optional[int] = N
                 user.id, experience.id, db, year, start_date, end_date).count()
             experience_type_agg_dict[experience.experience_type] = experience_type_agg_dict.get(
                 experience.experience_type, 0) + 1
+
+    standalone_experiences = get_all_experiences_query(
+        user.id,
+        db,
+        year,
+        start_date,
+        end_date,
+        exclude=True,
+    ).all()
+    count_experiences += len(standalone_experiences)
+    for experience in standalone_experiences:
+        count_media_assets += get_all_media_assets_query(
+            user.id,
+            experience.id,
+            db,
+            year,
+            start_date,
+            end_date,
+        ).count()
+        experience_type_agg_dict[experience.experience_type] = (
+            experience_type_agg_dict.get(experience.experience_type, 0) + 1
+        )
     experience_type_agg = []
     for key, value in experience_type_agg_dict.items():
         experience_type_agg.append(

@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Query, Session as SASession
 from PIL import Image
 
+from api_schema import LocationCreate
 from db_init import Experience, LifePeriod, Location, MediaAsset, User, Session
 
 # test use only replaced with user auth later
@@ -37,20 +38,30 @@ def check_unique_user_username(
         raise HTTPException(status_code=400, detail="Username already exists")
 
 
-def check_unique_location_city_country_pair(
-    new_city: str,
-    new_country: str,
+def create_location_if_not_exists(
+    location: LocationCreate,
     db: SASession,
     exclude_location_id: Optional[int] = None,
-) -> None:
+) -> Location:
     query = db.query(Location).filter(
-        Location.city == new_city,
-        Location.country == new_country,
+        Location.city == location.city,
+        Location.country == location.country,
     )
     if exclude_location_id is not None:
         query = query.filter(Location.id != exclude_location_id)
-    if query.first():
-        raise HTTPException(status_code=400, detail="Location already exists")
+    existing_location = query.first()
+    if existing_location:
+        return existing_location
+
+    new_location = Location(
+        city=location.city,
+        country=location.country,
+        longitude=location.longitude,
+        latitude=location.latitude,
+    )
+    db.add(new_location)
+    db.flush()
+    return new_location
 
 
 def check_unique_life_period_title(
@@ -186,6 +197,8 @@ def get_all_life_periods_query(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     location_id: Optional[int] = None,
+    search: Optional[str] = None,
+    limit: Optional[int] = None
 ) -> Query:
     query = db.query(LifePeriod).filter(LifePeriod.user_id == user_id)
     if year is not None:
@@ -199,10 +212,23 @@ def get_all_life_periods_query(
         query = query.filter(LifePeriod.start_date <= end_date)
     if location_id is not None:
         query = query.filter(LifePeriod.location_id == location_id)
-    return query.order_by(LifePeriod.start_date)
+    if search is not None and search.strip():
+        escaped_search = (
+            search.strip()
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        query = query.filter(
+            LifePeriod.title.ilike(f"%{escaped_search}%", escape="\\")
+        )
+    query = query.order_by(LifePeriod.start_date)
+    if limit is not None:
+        query = query.limit(limit)
+    return query
 
 
-def get_all_experiences_query(
+def get_all_experiences_under_certain_life_period_query(
     user_id: int,
     life_period_id: int,
     db: SASession,
@@ -232,6 +258,36 @@ def get_all_experiences_query(
         query = query.limit(experience_limit)
     return query
 
+def get_all_experiences_query(
+    user_id: int,
+    db: SASession,
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    experience_limit: Optional[int] = None,
+    location_id: Optional[int] = None,
+    exclude: Optional[bool] = False
+) -> Query:
+    query = db.query(Experience).filter(
+        Experience.user_id == user_id
+    )
+    if year is not None:
+        query = query.filter(
+            Experience.start_date <= date(year, 12, 31),
+            Experience.end_date >= date(year, 1, 1),
+        )
+    if start_date is not None:
+        query = query.filter(Experience.end_date >= start_date)
+    if end_date is not None:
+        query = query.filter(Experience.start_date <= end_date)
+    if location_id is not None:
+        query = query.filter(Experience.location_id == location_id)
+    if exclude:
+        query = query.filter(Experience.life_period_id.is_(None))
+    query = query.order_by(Experience.start_date)
+    if experience_limit is not None:
+        query = query.limit(experience_limit)
+    return query
 
 def get_all_media_assets_query(
     user_id: int,

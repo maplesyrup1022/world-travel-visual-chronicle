@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import React, { useState } from "react";
+import { formatDateInput, parseDateInput } from "./dateInput";
 
 const MIN_YEAR = 2016;
 const CURRENT_YEAR = new Date().getFullYear();
-const MAX_DATE = new Date();
+const today = new Date();
+const MAX_DATE = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 const MIN_DATE = `${MIN_YEAR}-01-01`;
 
 const dateForYear = (year, endOfYear = false) => {
@@ -17,6 +19,8 @@ const dateForYear = (year, endOfYear = false) => {
 export default function Timeline({ onDateRangeChange }) {
   const [startDate, setStartDate] = useState(MIN_DATE);
   const [endDate, setEndDate] = useState(MAX_DATE);
+  const [startDateText, setStartDateText] = useState(formatDateInput(MIN_DATE));
+  const [endDateText, setEndDateText] = useState(formatDateInput(MAX_DATE));
   const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR);
 
   const updateYear = (value) => {
@@ -26,6 +30,8 @@ export default function Timeline({ onDateRangeChange }) {
     setSelectedYear(year);
     setStartDate(nextStartDate);
     setEndDate(nextEndDate);
+    setStartDateText(formatDateInput(nextStartDate));
+    setEndDateText(formatDateInput(nextEndDate));
     onDateRangeChange?.({
       startDate: nextStartDate,
       endDate: nextEndDate,
@@ -33,14 +39,18 @@ export default function Timeline({ onDateRangeChange }) {
     });
   };
 
-  const updateStartDate = (value) => {
+  const updateStartDate = (text) => {
+    setStartDateText(text);
+    const value = parseDateInput(text);
     if (!value || value < MIN_DATE || value > endDate) return;
     setStartDate(value);
     setSelectedYear(Number(value.slice(0, 4)));
     onDateRangeChange?.({ startDate: value, endDate });
   };
 
-  const updateEndDate = (value) => {
+  const updateEndDate = (text) => {
+    setEndDateText(text);
+    const value = parseDateInput(text);
     if (!value || value < startDate || value > MAX_DATE) return;
     setEndDate(value);
     setSelectedYear(Number(value.slice(0, 4)));
@@ -96,22 +106,24 @@ export default function Timeline({ onDateRangeChange }) {
             <label className="flex items-center gap-2">
               From
               <input
-                type="date"
-                min={MIN_DATE}
-                max={endDate}
-                value={startDate}
+                type="text"
+                inputMode="numeric"
+                placeholder="YYYY/MM/DD"
+                value={startDateText}
                 onChange={(event) => updateStartDate(event.target.value)}
+                onBlur={() => setStartDateText(formatDateInput(startDate))}
                 className="timeline-date-input rounded border border-white/30 bg-white/10 px-1.5 py-1 text-sm font-medium font-caveat normal-case tracking-normal text-gray-100"
               />
             </label>
             <label className="flex items-center gap-2">
               To
               <input
-                type="date"
-                min={startDate}
-                max={MAX_DATE}
-                value={endDate}
+                type="text"
+                inputMode="numeric"
+                placeholder="YYYY/MM/DD"
+                value={endDateText}
                 onChange={(event) => updateEndDate(event.target.value)}
+                onBlur={() => setEndDateText(formatDateInput(endDate))}
                 className="timeline-date-input rounded border border-white/30 bg-white/10 px-1.5 py-1 text-sm font-medium font-caveat normal-case tracking-normal text-gray-100"
               />
             </label>

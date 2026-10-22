@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { parseDateInput } from "./dateInput";
 
 const actions = [
   { key: "life-period", label: "Life Period", className: "bg-[#f49ab8]" },
@@ -11,17 +12,17 @@ const actions = [
 const fieldGroups = {
   "life-period": {
     title: "New life period*",
-    fields: ["Description", "Start date*", "End date*", "Tag", "Location id*"],
+    fields: ["Description", "Start date*", "End date*", "Tag", "Location*"],
   },
   experience: {
     title: "New experience*",
     fields: [
-      "life period id*",
-      "Description",
+      "Life period",
       "Experience type",
+      "Description",
       "Start date*",
       "End date*",
-      "Location id",
+      "Location",
     ],
   },
   media: {
@@ -60,9 +61,135 @@ export default function Create() {
   const [titleText, setTitleText] = useState("");
   const [formPosition, setFormPosition] = useState({ x: 0, y: 0 });
   const [saveNotice, setSaveNotice] = useState(null);
+  const [placeQuery, setPlaceQuery] = useState("");
+  const [placeResults, setPlaceResults] = useState([]);
+  const [selectedPlace, setSelectedPlace] = useState(null);
+  const [placeSearchError, setPlaceSearchError] = useState("");
+  const [isSearchingPlaces, setIsSearchingPlaces] = useState(false);
+  const [lifePeriodQuery, setLifePeriodQuery] = useState("");
+  const [lifePeriodDropdownOpen, setLifePeriodDropdownOpen] = useState(false);
+  const [lifePeriodResults, setLifePeriodResults] = useState([]);
+  const [selectedLifePeriod, setSelectedLifePeriod] = useState(null);
+  const [lifePeriodSearchError, setLifePeriodSearchError] = useState("");
+  const [isSearchingLifePeriods, setIsSearchingLifePeriods] = useState(false);
   const rootRef = useRef(null);
   const dragStartRef = useRef(null);
   const noticeTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (
+      !["life-period", "experience"].includes(activeForm) ||
+      !placeQuery.trim()
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      const accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+      if (!accessToken) {
+        setPlaceSearchError("Mapbox search is not configured.");
+        setIsSearchingPlaces(false);
+        return;
+      }
+
+      setIsSearchingPlaces(true);
+      setPlaceSearchError("");
+      try {
+        const params = new URLSearchParams({
+          q: placeQuery.trim(),
+          types: "place",
+          autocomplete: "false",
+          access_token: accessToken,
+        });
+        const response = await fetch(
+          `https://api.mapbox.com/search/geocode/v6/forward?${params}`,
+          { signal: controller.signal },
+        );
+        if (!response.ok) {
+          throw new Error(`Place search failed (${response.status}).`);
+        }
+
+        const result = await response.json();
+        const places = (result.features || [])
+          .map((feature) => {
+            const city = feature.properties?.name;
+            const country = feature.properties?.context?.country?.name;
+            const coordinates = feature.geometry?.coordinates;
+            if (
+              !city ||
+              !country ||
+              !Array.isArray(coordinates) ||
+              coordinates.length < 2
+            ) {
+              return null;
+            }
+            return {
+              city,
+              country,
+              longitude: coordinates[0],
+              latitude: coordinates[1],
+            };
+          })
+          .filter(Boolean);
+        setPlaceResults(places);
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setPlaceSearchError(error.message || "Place search failed.");
+          setPlaceResults([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsSearchingPlaces(false);
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeForm, placeQuery]);
+
+  useEffect(() => {
+    if (activeForm !== "experience" || !lifePeriodDropdownOpen) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsSearchingLifePeriods(true);
+      setLifePeriodSearchError("");
+      try {
+        const params = new URLSearchParams({ limit: "5" });
+        if (lifePeriodQuery.trim()) {
+          params.set("search", lifePeriodQuery.trim());
+        }
+        const response = await fetch(
+          `http://127.0.0.1:8000/life-periods?${params}`,
+          { signal: controller.signal },
+        );
+        const body = await response.text();
+        const result = body ? JSON.parse(body) : [];
+        if (!response.ok) {
+          throw new Error(
+            result.detail || `Life-period search failed (${response.status}).`,
+          );
+        }
+        setLifePeriodResults(result.slice(0, 5));
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setLifePeriodSearchError(
+            error.message || "Life-period search failed.",
+          );
+          setLifePeriodResults([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsSearchingLifePeriods(false);
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeForm, lifePeriodDropdownOpen, lifePeriodQuery]);
 
   const showSaveNotice = (notice) => {
     window.clearTimeout(noticeTimerRef.current);
@@ -79,17 +206,76 @@ export default function Create() {
     const req = Object.fromEntries(new FormData(e.target).entries()); // get all fields
 
     let url = "";
+    let body = req;
     if (activeForm === "life-period") {
+      if (!selectedPlace) {
+        showSaveNotice({
+          type: "error",
+          status: "Location required",
+          message: "Search for and select a city and country.",
+        });
+        return;
+      }
+      const startDate = parseDateInput(req["start_date*"]);
+      const endDate = parseDateInput(req["end_date*"]);
+      if (!startDate || !endDate) {
+        showSaveNotice({
+          type: "error",
+          status: "Invalid date",
+          message: "Enter dates in YYYY/MM/DD format.",
+        });
+        return;
+      }
+
+      body = {
+        title: req.title,
+        description: req.description || null,
+        start_date: startDate,
+        end_date: endDate,
+        tag: req.tag || null,
+        location: {
+          city: selectedPlace.city,
+          country: selectedPlace.country,
+          latitude: selectedPlace.latitude,
+          longitude: selectedPlace.longitude,
+        },
+      };
       url = "http://127.0.0.1:8000/life-periods";
     } else if (activeForm === "experience") {
-      url = `http://127.0.0.1:8000/life-periods/${req["life period id*"]}/experiences`;
+      const startDate = parseDateInput(req["start_date*"]);
+      const endDate = parseDateInput(req["end_date*"]);
+      if (!startDate || !endDate) {
+        showSaveNotice({
+          type: "error",
+          status: "Invalid date",
+          message: "Enter dates in YYYY/MM/DD format.",
+        });
+        return;
+      }
+      body = {
+        title: req.title,
+        life_period_id: selectedLifePeriod ? selectedLifePeriod.id : null,
+        description: req.description || null,
+        experience_type: req.experience_type || null,
+        start_date: startDate,
+        end_date: endDate,
+        location: selectedPlace
+          ? {
+              city: selectedPlace.city,
+              country: selectedPlace.country,
+              latitude: selectedPlace.latitude,
+              longitude: selectedPlace.longitude,
+            }
+          : null,
+      };
+      url = "http://127.0.0.1:8000/experiences";
     }
 
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
+        body: JSON.stringify(body),
       });
       const responseText = await res.text();
       let result = {};
@@ -160,6 +346,17 @@ export default function Create() {
     setActiveForm(formKey);
     setTitleText(fieldGroups[formKey].title);
     setFormPosition({ x: 0, y: 0 });
+    setPlaceQuery("");
+    setPlaceResults([]);
+    setSelectedPlace(null);
+    setPlaceSearchError("");
+    setIsSearchingPlaces(false);
+    setLifePeriodQuery("");
+    setLifePeriodDropdownOpen(false);
+    setLifePeriodResults([]);
+    setSelectedLifePeriod(null);
+    setLifePeriodSearchError("");
+    setIsSearchingLifePeriods(false);
   };
 
   const handleFormPointerDown = (event) => {
@@ -329,7 +526,138 @@ export default function Create() {
                   <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.16em] text-stone-500">
                     {field}
                   </span>
-                  {field === "Description" ? (
+                  {field === "Life period" && activeForm === "experience" ? (
+                    <div className="relative">
+                      <input
+                        autoComplete="off"
+                        aria-label="Search life periods"
+                        aria-controls="experience-life-period-results"
+                        aria-expanded={lifePeriodDropdownOpen}
+                        className={`w-full rounded-xl border border-stone-200 bg-white px-3 py-2 outline-none focus:ring-2 ${accent.focus}`}
+                        onFocus={() => setLifePeriodDropdownOpen(true)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            setLifePeriodDropdownOpen(false);
+                          }
+                        }}
+                        onChange={(event) => {
+                          setLifePeriodQuery(event.target.value);
+                          setSelectedLifePeriod(null);
+                          setLifePeriodResults([]);
+                          setLifePeriodSearchError("");
+                          setIsSearchingLifePeriods(false);
+                          setLifePeriodDropdownOpen(true);
+                        }}
+                        placeholder="Search life periods"
+                        role="combobox"
+                        value={selectedLifePeriod?.title || lifePeriodQuery}
+                      />
+                      {isSearchingLifePeriods ? (
+                        <p className="mt-1 text-xs text-stone-500">
+                          Searching...
+                        </p>
+                      ) : null}
+                      {lifePeriodSearchError ? (
+                        <p role="alert" className="mt-1 text-xs text-red-700">
+                          {lifePeriodSearchError}
+                        </p>
+                      ) : null}
+                      {lifePeriodDropdownOpen &&
+                      lifePeriodResults.length > 0 ? (
+                        <ul
+                          id="experience-life-period-results"
+                          role="listbox"
+                          className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
+                        >
+                          {lifePeriodResults.map((lifePeriod) => (
+                            <li key={lifePeriod.id}>
+                              <button
+                                type="button"
+                                role="option"
+                                aria-selected={
+                                  selectedLifePeriod?.id === lifePeriod.id
+                                }
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  setSelectedLifePeriod(lifePeriod);
+                                  setLifePeriodQuery("");
+                                  setLifePeriodResults([]);
+                                  setLifePeriodSearchError("");
+                                  setLifePeriodDropdownOpen(false);
+                                }}
+                                className="block w-full px-3 py-2 text-left text-sm hover:bg-stone-100"
+                                style={{ textAlign: "left" }}
+                              >
+                                {lifePeriod.title}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : (field === "Location*" && activeForm === "life-period") ||
+                    (field === "Location" && activeForm === "experience") ? (
+                    <div className="relative">
+                      <input
+                        autoComplete="off"
+                        aria-label="Search for a city"
+                        className={`w-full rounded-xl border border-stone-200 bg-white px-3 py-2 outline-none focus:ring-2 ${accent.focus}`}
+                        onChange={(event) => {
+                          setPlaceQuery(event.target.value);
+                          setSelectedPlace(null);
+                          setPlaceResults([]);
+                          setPlaceSearchError("");
+                          setIsSearchingPlaces(false);
+                        }}
+                        placeholder="Search city"
+                        role="combobox"
+                        aria-expanded={placeResults.length > 0}
+                        aria-controls="life-period-place-results"
+                        value={
+                          selectedPlace
+                            ? `${selectedPlace.city}, ${selectedPlace.country}`
+                            : placeQuery
+                        }
+                      />
+                      {isSearchingPlaces ? (
+                        <p className="mt-1 text-xs text-stone-500">
+                          Searching...
+                        </p>
+                      ) : null}
+                      {placeSearchError ? (
+                        <p role="alert" className="mt-1 text-xs text-red-700">
+                          {placeSearchError}
+                        </p>
+                      ) : null}
+                      {placeResults.length > 0 ? (
+                        <ul
+                          id="life-period-place-results"
+                          role="listbox"
+                          className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
+                        >
+                          {placeResults.map((place, index) => (
+                            <li key={`${place.city}-${place.country}-${index}`}>
+                              <button
+                                type="button"
+                                role="option"
+                                aria-selected={false}
+                                onClick={() => {
+                                  setSelectedPlace(place);
+                                  setPlaceQuery("");
+                                  setPlaceResults([]);
+                                  setPlaceSearchError("");
+                                }}
+                                className="block w-full px-3 py-2 text-left text-sm hover:bg-stone-100"
+                                style={{ textAlign: "left" }}
+                              >
+                                {place.city}, {place.country}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : field === "Description" ? (
                     <textarea
                       name="description"
                       className={`min-h-24 w-full rounded-xl border border-stone-200 bg-white px-3 py-2 outline-none focus:ring-2 ${accent.focus}`}
@@ -339,10 +667,17 @@ export default function Create() {
                     <input
                       name={`${field.toLowerCase().replace(/ /g, "_")}`}
                       className={`w-full rounded-xl border border-stone-200 bg-white px-3 py-2 outline-none focus:ring-2 ${accent.focus}`}
-                      type={
-                        field.toLowerCase().includes("date") ? "date" : "text"
+                      type="text"
+                      inputMode={
+                        field.toLowerCase().includes("date")
+                          ? "numeric"
+                          : undefined
                       }
-                      placeholder={`Add ${field.toLowerCase()}`}
+                      placeholder={
+                        field.toLowerCase().includes("date")
+                          ? "YYYY/MM/DD"
+                          : `Add ${field.toLowerCase()}`
+                      }
                     />
                   )}
                 </label>

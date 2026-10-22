@@ -57,7 +57,7 @@ class LifePeriodCreate(BaseModel):
     start_date: date
     end_date: date
     tag: Optional[str] = None
-    location_id: int
+    location: LocationCreate
 
     @model_validator(mode="after")
     def validate_dates(self):
@@ -90,11 +90,12 @@ class LifePeriodResponse(BaseModel):
 
 class ExperienceCreate(BaseModel):
     title: str
+    life_period_id: Optional[int] = None
     description: Optional[str] = None
     experience_type: Optional[str] = None
     start_date: date
     end_date: date
-    location_id: Optional[int] = None
+    location: Optional[LocationCreate] = None
 
     @model_validator(mode="after")
     def validate_dates(self):
@@ -124,7 +125,7 @@ class ExperienceResponse(BaseModel):
     start_date: date
     end_date: date
     location_id: Optional[int] = None
-    life_period_id: int
+    life_period_id: Optional[int] = None
 
 
 class MediaAssetCreate(BaseModel):
@@ -188,7 +189,7 @@ class SummaryExperienceResponse(BaseModel):
     start_date: date
     end_date: date
     location_id: Optional[int] = None
-    life_period_id: int
+    life_period_id: Optional[int] = None
     media_assets: List[MediaAssetResponse] = Field(default_factory=list)
 
 
@@ -205,6 +206,13 @@ class SummaryLifePeriodResponse(BaseModel):
     experiences: List[SummaryExperienceResponse] = Field(default_factory=list)
 
 
+class ChronicleResponse(BaseModel):
+    life_periods: List[SummaryLifePeriodResponse] = Field(default_factory=list)
+    standalone_experiences: List[SummaryExperienceResponse] = Field(
+        default_factory=list
+    )
+
+
 class LocationSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -215,7 +223,7 @@ class LocationSummaryResponse(BaseModel):
 class ExperienceTypeAggResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    experience_type: str
+    experience_type: Optional[str] = None
     count: int
 
 
