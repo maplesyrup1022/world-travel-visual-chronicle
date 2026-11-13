@@ -685,7 +685,7 @@ def get_chronicle_summary(db: SASession = Depends(get_db), year: Optional[int] =
         user.id, db, year=year, start_date=start_date, end_date=end_date
     )
     client = OpenAI(
-        api_key=os.getenv("CHATANYWHERE_API_KEY") or os.getenv("OPENAI_API_KEY"),
+        api_key=os.getenv("CHATANYWHERE_API_KEY"),
         base_url="https://api.chatanywhere.tech/v1",
     )
 
