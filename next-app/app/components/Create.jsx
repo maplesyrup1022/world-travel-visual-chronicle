@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { parseDateInput } from "./dateInput";
+import { formatDateInput, parseDateInput } from "./dateInput";
 
 const actions = [
   { key: "life-period", label: "Life Period", className: "bg-[#f49ab8]" },
@@ -26,14 +26,8 @@ const fieldGroups = {
     ],
   },
   media: {
-    title: "Upload media",
-    fields: [
-      "Description",
-      "File url",
-      "Captured at",
-      "Experience id",
-      "Location id",
-    ],
+    title: "Media Title",
+    fields: ["Captured at", "Location", "Description", "Experience"],
   },
 };
 
@@ -59,6 +53,12 @@ export default function Create() {
   const [open, setOpen] = useState(false);
   const [activeForm, setActiveForm] = useState(null);
   const [titleText, setTitleText] = useState("");
+  const [selectedFileName, setSelectedFileName] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [mediaInspection, setMediaInspection] = useState(null);
+  const [mediaInspectionError, setMediaInspectionError] = useState("");
+  const [isInspectingMedia, setIsInspectingMedia] = useState(false);
+  const [mediaCapturedAt, setMediaCapturedAt] = useState("");
   const [formPosition, setFormPosition] = useState({ x: 0, y: 0 });
   const [saveNotice, setSaveNotice] = useState(null);
   const [placeQuery, setPlaceQuery] = useState("");
@@ -72,13 +72,20 @@ export default function Create() {
   const [selectedLifePeriod, setSelectedLifePeriod] = useState(null);
   const [lifePeriodSearchError, setLifePeriodSearchError] = useState("");
   const [isSearchingLifePeriods, setIsSearchingLifePeriods] = useState(false);
+  const [experienceQuery, setExperienceQuery] = useState("");
+  const [experienceDropdownOpen, setExperienceDropdownOpen] = useState(false);
+  const [experienceResults, setExperienceResults] = useState([]);
+  const [selectedExperience, setSelectedExperience] = useState(null);
+  const [experienceSearchError, setExperienceSearchError] = useState("");
+  const [isSearchingExperiences, setIsSearchingExperiences] = useState(false);
   const rootRef = useRef(null);
   const dragStartRef = useRef(null);
   const noticeTimerRef = useRef(null);
+  const mediaFileInputRef = useRef(null);
 
   useEffect(() => {
     if (
-      !["life-period", "experience"].includes(activeForm) ||
+      !["life-period", "experience", "media"].includes(activeForm) ||
       !placeQuery.trim()
     ) {
       return;
@@ -191,6 +198,116 @@ export default function Create() {
     };
   }, [activeForm, lifePeriodDropdownOpen, lifePeriodQuery]);
 
+  useEffect(() => {
+    if (
+      activeForm !== "media" ||
+      !experienceDropdownOpen ||
+      !experienceQuery.trim()
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsSearchingExperiences(true);
+      setExperienceSearchError("");
+      try {
+        const params = new URLSearchParams({
+          search: experienceQuery.trim(),
+          limit: "5",
+        });
+        const response = await fetch(
+          `http://127.0.0.1:8000/experiences?${params}`,
+          { signal: controller.signal },
+        );
+        const body = await response.text();
+        const result = body ? JSON.parse(body) : [];
+        if (!response.ok) {
+          throw new Error(
+            result.detail || `Experience search failed (${response.status}).`,
+          );
+        }
+        setExperienceResults(result.slice(0, 5));
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setExperienceSearchError(
+            error.message || "Experience search failed.",
+          );
+          setExperienceResults([]);
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsSearchingExperiences(false);
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeForm, experienceDropdownOpen, experienceQuery]);
+
+  useEffect(() => {
+    if (activeForm !== "media" || !selectedFileName || !selectedFile) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const inspectMedia = async () => {
+      setIsInspectingMedia(true);
+      setMediaInspection(null);
+      setMediaInspectionError("");
+      setExperienceQuery("");
+      setExperienceResults([]);
+      setSelectedExperience(null);
+      setExperienceSearchError("");
+      setExperienceDropdownOpen(false);
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:8000/media-assets/info`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": selectedFile.type || "application/octet-stream",
+            },
+            body: selectedFile,
+            signal: controller.signal,
+          },
+        );
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            result.detail || `Image inspection failed (${response.status}).`,
+          );
+        }
+        setMediaInspection(result);
+        const matchingExperiences = result.experiences || [];
+        setExperienceResults(matchingExperiences);
+        setSelectedExperience(
+          matchingExperiences.length === 1 ? matchingExperiences[0] : null,
+        );
+        setExperienceDropdownOpen(matchingExperiences.length > 1);
+        setMediaCapturedAt(
+          result.captured_at ? formatDateInput(result.captured_at) : "",
+        );
+        setSelectedPlace(result.locations || null);
+        setPlaceQuery("");
+        setPlaceResults([]);
+        setPlaceSearchError("");
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setMediaInspectionError(
+            error.message || "Could not read this image's information.",
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsInspectingMedia(false);
+      }
+    };
+
+    inspectMedia();
+    return () => controller.abort();
+  }, [activeForm, selectedFileName, selectedFile]);
+
   const showSaveNotice = (notice) => {
     window.clearTimeout(noticeTimerRef.current);
     setSaveNotice(notice);
@@ -269,13 +386,59 @@ export default function Create() {
           : null,
       };
       url = "http://127.0.0.1:8000/experiences";
+    } else if (activeForm === "media") {
+      const file = req.file;
+      if (!(file instanceof File) || file.size === 0) {
+        showSaveNotice({
+          type: "error",
+          status: "Image required",
+          message: "Choose an image file to upload.",
+        });
+        return;
+      }
+      if (req.captured_at) {
+        const capturedAt = parseDateInput(req.captured_at);
+        if (!capturedAt) {
+          showSaveNotice({
+            type: "error",
+            status: "Invalid date",
+            message: "Enter the capture date in YYYY/MM/DD format.",
+          });
+          return;
+        }
+        req.captured_at = capturedAt;
+      }
+
+      const params = new URLSearchParams();
+      for (const field of ["description", "captured_at", "location_id"]) {
+        if (req[field]) params.set(field, req[field]);
+      }
+      if (selectedExperience) {
+        params.set("experience_id", selectedExperience.id);
+      }
+      if (selectedPlace) {
+        params.set("city", selectedPlace.city);
+        params.set("country", selectedPlace.country);
+        params.set("longitude", selectedPlace.longitude);
+        params.set("latitude", selectedPlace.latitude);
+      }
+      url = `http://127.0.0.1:8000/media-assets?${params.toString()}`;
     }
 
     try {
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        ...(activeForm === "media"
+          ? {
+              headers: {
+                "Content-Type": req.file.type || "application/octet-stream",
+              },
+              body: req.file,
+            }
+          : {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }),
       });
       const responseText = await res.text();
       let result = {};
@@ -345,6 +508,12 @@ export default function Create() {
   const selectForm = (formKey) => {
     setActiveForm(formKey);
     setTitleText(fieldGroups[formKey].title);
+    setSelectedFileName("");
+    setSelectedFile(null);
+    setMediaInspection(null);
+    setMediaInspectionError("");
+    setIsInspectingMedia(false);
+    setMediaCapturedAt("");
     setFormPosition({ x: 0, y: 0 });
     setPlaceQuery("");
     setPlaceResults([]);
@@ -357,6 +526,12 @@ export default function Create() {
     setSelectedLifePeriod(null);
     setLifePeriodSearchError("");
     setIsSearchingLifePeriods(false);
+    setExperienceQuery("");
+    setExperienceDropdownOpen(false);
+    setExperienceResults([]);
+    setSelectedExperience(null);
+    setExperienceSearchError("");
+    setIsSearchingExperiences(false);
   };
 
   const handleFormPointerDown = (event) => {
@@ -517,6 +692,83 @@ export default function Create() {
               />
             </div>
 
+            {activeForm === "media" ? (
+              <div className="mt-3 flex items-center gap-2">
+                {/* input styling trick, hides the ugly file input but style a button, when clicked on the button, mediaFileInputRef which refer to the file input gets clicked to save file name  */}
+                <input
+                  ref={mediaFileInputRef}
+                  id="media-file-upload"
+                  name="file"
+                  type="file"
+                  accept="image/*"
+                  required
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setSelectedFileName(event.target.files?.[0]?.name || "");
+                    setSelectedFile(file);
+                    setMediaInspection(null);
+                    setMediaInspectionError("");
+                    setMediaCapturedAt("");
+                    setExperienceQuery("");
+                    setExperienceDropdownOpen(false);
+                    setExperienceResults([]);
+                    setSelectedExperience(null);
+                    setExperienceSearchError("");
+                    setSelectedPlace(null);
+                    setPlaceQuery("");
+                    setPlaceResults([]);
+                    setPlaceSearchError("");
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => mediaFileInputRef.current?.click()}
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 font-sans text-xs font-semibold text-white transition ${accent.button}`}
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3.75 6.75h6l1.5 1.5h9v10.5h-16.5z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3.75 8.25h16.5"
+                    />
+                  </svg>
+                  Choose image
+                </button>
+                {selectedFileName ? (
+                  <span
+                    className="max-w-[14rem] truncate font-sans text-xs text-stone-500"
+                    title={selectedFileName}
+                  >
+                    {selectedFileName}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+
+            {activeForm === "media" ? (
+              <div className="mt-2 font-sans text-xs text-stone-600">
+                {isInspectingMedia ? <p>Reading image information...</p> : null}
+                {mediaInspectionError ? (
+                  <p role="alert" className="text-red-700">
+                    {mediaInspectionError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {form.fields.map((field) => (
                 <label
@@ -526,7 +778,87 @@ export default function Create() {
                   <span className="mb-1 block text-[10px] font-bold uppercase tracking-[0.16em] text-stone-500">
                     {field}
                   </span>
-                  {field === "Life period" && activeForm === "experience" ? (
+                  {field === "Experience" && activeForm === "media" ? (
+                    <div className="relative">
+                      <input
+                        autoComplete="off"
+                        aria-label="Search experiences"
+                        aria-controls="media-experience-results"
+                        aria-expanded={experienceDropdownOpen}
+                        className={`w-full rounded-xl border border-stone-200 bg-white px-3 py-2 outline-none focus:ring-2 ${accent.focus}`}
+                        onFocus={() => setExperienceDropdownOpen(true)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            setExperienceDropdownOpen(false);
+                          }
+                        }}
+                        onChange={(event) => {
+                          setExperienceQuery(event.target.value);
+                          setSelectedExperience(null);
+                          setExperienceResults([]);
+                          setExperienceSearchError("");
+                          setIsSearchingExperiences(false);
+                          setExperienceDropdownOpen(true);
+                        }}
+                        placeholder="Search experiences by title"
+                        role="combobox"
+                        value={selectedExperience?.title || experienceQuery}
+                      />
+                      {isSearchingExperiences ? (
+                        <p className="mt-1 text-xs text-stone-500">
+                          Searching...
+                        </p>
+                      ) : null}
+                      {experienceSearchError ? (
+                        <p role="alert" className="mt-1 text-xs text-red-700">
+                          {experienceSearchError}
+                        </p>
+                      ) : null}
+                      {experienceDropdownOpen &&
+                      (experienceResults.length > 0 ||
+                        (!experienceQuery.trim() &&
+                          mediaInspection &&
+                          !mediaInspection.experiences.length)) ? (
+                        <ul
+                          id="media-experience-results"
+                          role="listbox"
+                          className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
+                        >
+                          {experienceResults.length > 0 ? (
+                            experienceResults.map((experience) => (
+                              <li key={experience.id}>
+                                <button
+                                  type="button"
+                                  role="option"
+                                  aria-selected={
+                                    selectedExperience?.id === experience.id
+                                  }
+                                  onMouseDown={(event) =>
+                                    event.preventDefault()
+                                  }
+                                  onClick={() => {
+                                    setSelectedExperience(experience);
+                                    setExperienceQuery("");
+                                    setExperienceResults([]);
+                                    setExperienceSearchError("");
+                                    setExperienceDropdownOpen(false);
+                                  }}
+                                  className="block w-full px-3 py-2 text-left text-sm hover:bg-stone-100"
+                                  style={{ textAlign: "left" }}
+                                >
+                                  {experience.title}
+                                </button>
+                              </li>
+                            ))
+                          ) : (
+                            <li className="px-3 py-2 text-sm text-stone-500">
+                              No date matches. Search by title.
+                            </li>
+                          )}
+                        </ul>
+                      ) : null}
+                    </div>
+                  ) : field === "Life period" && activeForm === "experience" ? (
                     <div className="relative">
                       <input
                         autoComplete="off"
@@ -596,7 +928,8 @@ export default function Create() {
                       ) : null}
                     </div>
                   ) : (field === "Location*" && activeForm === "life-period") ||
-                    (field === "Location" && activeForm === "experience") ? (
+                    (field === "Location" &&
+                      ["experience", "media"].includes(activeForm)) ? (
                     <div className="relative">
                       <input
                         autoComplete="off"
@@ -612,7 +945,7 @@ export default function Create() {
                         placeholder="Search city"
                         role="combobox"
                         aria-expanded={placeResults.length > 0}
-                        aria-controls="life-period-place-results"
+                        aria-controls="place-search-results"
                         value={
                           selectedPlace
                             ? `${selectedPlace.city}, ${selectedPlace.country}`
@@ -631,7 +964,7 @@ export default function Create() {
                       ) : null}
                       {placeResults.length > 0 ? (
                         <ul
-                          id="life-period-place-results"
+                          id="place-search-results"
                           role="listbox"
                           className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
                         >
@@ -677,6 +1010,16 @@ export default function Create() {
                         field.toLowerCase().includes("date")
                           ? "YYYY/MM/DD"
                           : `Add ${field.toLowerCase()}`
+                      }
+                      value={
+                        field === "Captured at" && activeForm === "media"
+                          ? mediaCapturedAt
+                          : undefined
+                      }
+                      onChange={
+                        field === "Captured at" && activeForm === "media"
+                          ? (event) => setMediaCapturedAt(event.target.value)
+                          : undefined
                       }
                     />
                   )}

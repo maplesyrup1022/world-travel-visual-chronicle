@@ -5,7 +5,18 @@ from typing import Optional
 import os
 from dotenv import load_dotenv
 
-from sqlalchemy import Date, Float, ForeignKey, Integer, String, Text, create_engine, UniqueConstraint
+from sqlalchemy import (
+    Date,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 

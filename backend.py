@@ -1,36 +1,51 @@
 from datetime import date
+from io import BytesIO
+import json
+import os
 from typing import List, Optional
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session as SASession
+from PIL import Image, ImageOps, UnidentifiedImageError
+from openai import OpenAI
+from dotenv import load_dotenv
 
 from api_schema import (
     ExperienceCreate,
     ExperienceResponse,
     ExperienceUpdate,
-    ChronicleResponse,
     LifePeriodCreate,
     LifePeriodResponse,
     LifePeriodUpdate,
     LocationCreate,
+    LocationNameResponse,
     LocationResponse,
     LocationSummaryResponse,
     LocationUpdate,
     MediaAssetCreate,
     MediaAssetResponse,
+    MediaAssetInfoResponse,
     MediaAssetUpdate,
     SummaryExperienceResponse,
     SummaryLifePeriodResponse,
     UserCreate,
     UserResponse,
     UserUpdate,
-    ExperienceTypeAggResponse,
     StatsResponse
 )
-from db_init import Experience, LifePeriod, Location, MediaAsset, User
+from db_init import (
+    Experience,
+    LifePeriod,
+    Location,
+    MediaAsset,
+    User
+)
 from service import (
+    THUMBNAIL_SIZE,
+    UPLOAD_DIR,
     check_unique_experience_title,
     check_unique_life_period_title,
     create_location_if_not_exists,
@@ -39,20 +54,27 @@ from service import (
     extract_image_metadata,
     get_current_user,
     get_db,
-    get_all_experiences_under_certain_life_period_query,
+    get_all_experiences_under_life_period_query,
     get_all_experiences_query,
     get_all_life_periods_query,
+    get_all_media_assets_under_experience_query,
     get_all_media_assets_query,
     get_experience,
     get_life_period,
     get_location,
     get_media_asset,
     validate_start_end_date,
-    get_unique_location_ids_visited
+    get_unique_location_ids_visited,
+    get_nearest_locations,
+    read_uploaded_image,
+    get_chronicle,
+    get_chronicle_stats as get_chronicle_stats_service,
 )
 
+load_dotenv()
 
 api = FastAPI(title="World Travel Visual Chronicle API")
+api.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 origins = [
     "http://localhost:3000",  # Next.js dev server
@@ -179,16 +201,23 @@ def get_location_summary(
         user.id, db, year, start_date, end_date, location_id).all()
     summary_life_periods = []
     for life_period in life_periods:
-        experiences = get_all_experiences_under_certain_life_period_query(
+        experiences = get_all_experiences_under_life_period_query(
             user.id, life_period.id, db, None, None, None,
             experience_limit, None).all()
         summary_experiences = []
         for experience in experiences:
-            media_assets = get_all_media_assets_query(
+            media_assets = get_all_media_assets_under_experience_query(
                 user.id, experience.id, db, None, None, None,
                 media_asset_limit).all()
             summary_experience = SummaryExperienceResponse.model_validate(
                 experience)
+            summary_experience.location = (
+                LocationNameResponse.model_validate(
+                    get_location(experience.location_id, db)
+                )
+                if experience.location_id is not None
+                else None
+            )
             summary_experience.media_assets = [
                 MediaAssetResponse.model_validate(media)
                 for media in media_assets
@@ -197,6 +226,9 @@ def get_location_summary(
 
         summary_life_period = SummaryLifePeriodResponse.model_validate(
             life_period)
+        summary_life_period.location = LocationNameResponse.model_validate(
+            get_location(life_period.location_id, db)
+        )
         summary_life_period.experiences = summary_experiences
         summary_life_periods.append(summary_life_period)
 
@@ -337,7 +369,7 @@ def create_experience(
 
 
 @api.get("/life-periods/{life_period_id}/experiences", response_model=List[ExperienceResponse])
-def get_all_experiences(
+def get_all_experiences_under_life_period(
     life_period_id: int,
     year: Optional[int] = None,
     start_date: Optional[date] = None,
@@ -348,9 +380,34 @@ def get_all_experiences(
 ):
     user = get_current_user(db)
     get_life_period(user.id, life_period_id, db)
-    return get_all_experiences_under_certain_life_period_query(
+    return get_all_experiences_under_life_period_query(
         user.id, life_period_id, db, year, start_date, end_date,
         experience_limit, location_id).all()
+
+
+@api.get("/experiences", response_model=List[ExperienceResponse])
+def get_all_experiences(
+    db: SASession = Depends(get_db),
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    location_id: Optional[int] = None,
+    exclude: Optional[bool] = False,
+    search: Optional[str] = None,
+    experience_limit: Optional[int] = None
+):
+    user = get_current_user(db)
+    return get_all_experiences_query(
+        user_id=user.id,
+        db=db,
+        year=year,
+        start_date=start_date,
+        end_date=end_date,
+        location_id=location_id,
+        exclude=exclude,
+        search=search,
+        experience_limit=experience_limit,
+    ).all()
 
 
 @api.get("/experiences/{experience_id}", response_model=ExperienceResponse)
@@ -397,24 +454,148 @@ def delete_experience(experience_id: int, db: SASession = Depends(get_db)):
 # MediaAsset routes. A media asset may be uploaded before it is linked to an Experience.
 
 
-@api.post("/media-assets", response_model=MediaAssetResponse)
-def create_media_asset(data: MediaAssetCreate, db: SASession = Depends(get_db)):
+@api.post("/media-assets/info", response_model=MediaAssetInfoResponse)
+async def read_upload_media_info(
+    request: Request,
+    db: SASession = Depends(get_db),
+):
+    _, metadata = await read_uploaded_image(request)
     user = get_current_user(db)
-    if data.title is not None:
-        check_unique_media_asset_title(user.id, data.title, db)
-    if data.location_id is not None:
-        get_location(data.location_id, db)
-    if data.experience_id is not None:
-        get_experience(user.id, data.experience_id, db)
-    media_asset = MediaAsset(**data.model_dump(), user_id=user.id)
-    if media_asset.captured_at is None:
-        media_asset.captured_at = extract_image_metadata(data.file_url)[
-            "captured_at"]
-    db.add(media_asset)
-    db.commit()
-    db.refresh(media_asset)
+    captured_at = metadata["captured_at"]
+    if captured_at is not None:
+        experiences = get_all_experiences_query(
+            user_id=user.id,
+            db=db,
+            start_date=captured_at,
+            end_date=captured_at,
+            experience_limit=5).all()
+    else:
+        experiences = []
+
+    location = None
+    if metadata["latitude"] is not None and metadata["longitude"] is not None:
+        location = await get_nearest_locations(
+            metadata["longitude"],
+            metadata["latitude"],
+            1
+        )
+
+    return {
+        "captured_at": captured_at,
+        "locations": location,
+        "experiences": [
+            {
+                "id": experience.id,
+                "title": experience.title,
+            }
+            for experience in experiences
+        ],
+    }
+
+
+@api.post("/media-assets", response_model=MediaAssetResponse)
+async def upload_media_asset(
+    request: Request,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    captured_at: Optional[date] = None,
+    experience_id: Optional[int] = None,
+    location_id: Optional[int] = None,
+    city: Optional[str] = None,
+    country: Optional[str] = None,
+    longitude: Optional[float] = None,
+    latitude: Optional[float] = None,
+    db: SASession = Depends(get_db),
+):
+    image_data, metadata = await read_uploaded_image(request)
+    try:
+        with Image.open(BytesIO(image_data)) as image:
+            try:
+                thumbnail = ImageOps.exif_transpose(image)
+            except (OSError, SyntaxError, ValueError):
+                thumbnail = image.copy()
+            thumbnail.thumbnail(THUMBNAIL_SIZE, Image.Resampling.LANCZOS)
+            if (
+                thumbnail.mode in ("RGBA", "LA")
+                or "transparency" in thumbnail.info
+            ):
+                rgba = thumbnail.convert("RGBA")
+                background = Image.new("RGB", rgba.size, "white")
+                background.paste(rgba, mask=rgba.getchannel("A"))
+                thumbnail = background
+            else:
+                thumbnail = thumbnail.convert("RGB")
+            output = BytesIO()
+            thumbnail.save(output, format="JPEG", quality=85, optimize=True)
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        OSError,
+        UnidentifiedImageError,
+        ValueError,
+    ) as error:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The uploaded file could not be processed as an image: {error}",
+        ) from error
+
+    user = get_current_user(db)
+    if title is not None:
+        check_unique_media_asset_title(user.id, title, db)
+    if location_id is None and city and country:
+        location = create_location_if_not_exists(
+            LocationCreate(
+                city=city,
+                country=country,
+                longitude=longitude,
+                latitude=latitude,
+            ),
+            db,
+        )
+        location_id = location.id
+    if location_id is not None:
+        get_location(location_id, db)
+    if experience_id is not None:
+        get_experience(user.id, experience_id, db)
+
+    filename = f"{uuid4().hex}.jpg"
+    thumbnail_path = UPLOAD_DIR / filename
+    try:
+        thumbnail_path.write_bytes(output.getvalue())
+        media_asset = MediaAsset(
+            title=title,
+            description=description,
+            file_url=f"/uploads/{filename}",
+            captured_at=captured_at or metadata["captured_at"],
+            experience_id=experience_id,
+            location_id=location_id,
+            user_id=user.id,
+        )
+        db.add(media_asset)
+        db.commit()
+        db.refresh(media_asset)
+    except Exception:
+        db.rollback()
+        thumbnail_path.unlink(missing_ok=True)
+        raise
     return media_asset
 
+
+@api.get("/media-assets", response_model=List[MediaAssetResponse])
+def get_all_media_assets(
+    year: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    media_asset_limit: Optional[int] = None,
+    location_id: Optional[int] = None,
+    exclude: Optional[bool] = False,
+    search: Optional[str] = None,
+    db: SASession = Depends(get_db),
+):
+    user = get_current_user(db)
+    return get_all_media_assets_query(
+        user.id, db, year, start_date, end_date, location_id, exclude, search, media_asset_limit
+    ).all()
 
 @api.get("/media-assets/{media_asset_id}", response_model=MediaAssetResponse)
 def get_media_asset_route(media_asset_id: int, db: SASession = Depends(get_db)):
@@ -423,7 +604,7 @@ def get_media_asset_route(media_asset_id: int, db: SASession = Depends(get_db)):
 
 
 @api.get("/experiences/{experience_id}/media-assets", response_model=List[MediaAssetResponse])
-def get_all_media_assets(
+def get_all_media_assets_under_experience(
     experience_id: int,
     year: Optional[int] = None,
     start_date: Optional[date] = None,
@@ -434,7 +615,7 @@ def get_all_media_assets(
 ):
     user = get_current_user(db)
     get_experience(user.id, experience_id, db)
-    return get_all_media_assets_query(
+    return get_all_media_assets_under_experience_query(
         user.id, experience_id, db, year, start_date, end_date,
         media_asset_limit, location_id).all()
 
@@ -469,131 +650,73 @@ def delete_media_asset(media_asset_id: int, db: SASession = Depends(get_db)):
     return {"message": "Media asset deleted successfully"}
 
 
-@api.get("/chronicle", response_model=ChronicleResponse)
-def get_chronicle(db: SASession = Depends(get_db), year: Optional[int] = None,
+@api.get("/chronicle", response_model=List[SummaryLifePeriodResponse])
+def get_chronicle_route(db: SASession = Depends(get_db), year: Optional[int] = None,
                  start_date: Optional[date] = None, end_date: Optional[date] = None,
                  experience_limit: Optional[int] = None,
                  media_asset_limit: Optional[int] = 10):
     user = get_current_user(db)
-    life_periods = get_all_life_periods_query(
-        user.id, db, year, start_date, end_date).all()
-    summary_life_periods = []
-    for life_period in life_periods:
-        experiences = get_all_experiences_under_certain_life_period_query(
-            user.id, life_period.id, db, year, start_date, end_date,
-            experience_limit).all()
-        summary_experiences = []
-        for experience in experiences:
-            media_assets = get_all_media_assets_query(
-                user.id, experience.id, db, year, start_date, end_date,
-                media_asset_limit).all()
-            summary_experience = SummaryExperienceResponse.model_validate(
-                experience)
-            summary_experience.media_assets = [
-                MediaAssetResponse.model_validate(media)
-                for media in media_assets
-            ]
-            summary_experiences.append(summary_experience)
-
-        summary_life_period = SummaryLifePeriodResponse.model_validate(
-            life_period)
-        summary_life_period.experiences = summary_experiences
-        summary_life_periods.append(summary_life_period)
-
-    standalone_experiences = get_all_experiences_query(
-        user.id,
-        db,
-        year,
-        start_date,
-        end_date,
-        experience_limit,
-        exclude=True,
-    ).all()
-    summary_standalone_experiences = []
-    for experience in standalone_experiences:
-        media_assets = get_all_media_assets_query(
-            user.id,
-            experience.id,
-            db,
-            year,
-            start_date,
-            end_date,
-            media_asset_limit,
-        ).all()
-        summary_experience = SummaryExperienceResponse.model_validate(
-            experience
-        )
-        summary_experience.media_assets = [
-            MediaAssetResponse.model_validate(media)
-            for media in media_assets
-        ]
-        summary_standalone_experiences.append(summary_experience)
-
-    return ChronicleResponse(
-        life_periods=summary_life_periods,
-        standalone_experiences=summary_standalone_experiences,
+    return get_chronicle(
+        user_id=user.id, db=db, cap=False, year=year, start_date=start_date, end_date=end_date, experience_limit=experience_limit, media_asset_limit=media_asset_limit
     )
-
 
 @api.get("/chronicle/stats", response_model=StatsResponse)
 def get_chronicle_stats(db: SASession = Depends(get_db), year: Optional[int] = None,
-                       start_date: Optional[date] = None, end_date: Optional[int] = None):
+                       start_date: Optional[date] = None, end_date: Optional[date] = None):
     user = get_current_user(db)
-    life_periods = get_all_life_periods_query(
-        user.id, db, year, start_date, end_date).all()
-    count_life_periods = len(life_periods)
-    count_experiences = 0
-    count_media_assets = 0
-    experience_type_agg_dict = {}
-    for life_period in life_periods:
-        experiences = get_all_experiences_under_certain_life_period_query(
-            user.id, life_period.id, db, year, start_date, end_date).all()
-        count_experiences += len(experiences)
-        for experience in experiences:
-            count_media_assets += get_all_media_assets_query(
-                user.id, experience.id, db, year, start_date, end_date).count()
-            experience_type_agg_dict[experience.experience_type] = experience_type_agg_dict.get(
-                experience.experience_type, 0) + 1
-
-    standalone_experiences = get_all_experiences_query(
+    return get_chronicle_stats_service(
         user.id,
         db,
-        year,
-        start_date,
-        end_date,
-        exclude=True,
-    ).all()
-    count_experiences += len(standalone_experiences)
-    for experience in standalone_experiences:
-        count_media_assets += get_all_media_assets_query(
-            user.id,
-            experience.id,
-            db,
-            year,
-            start_date,
-            end_date,
-        ).count()
-        experience_type_agg_dict[experience.experience_type] = (
-            experience_type_agg_dict.get(experience.experience_type, 0) + 1
-        )
-    experience_type_agg = []
-    for key, value in experience_type_agg_dict.items():
-        experience_type_agg.append(
-            ExperienceTypeAggResponse.model_validate({"experience_type": key, "count": value}))
-    location_ids = get_unique_location_ids_visited(
-        user.id, db, year, start_date, end_date)
-    query = db.query(Location).filter(Location.id.in_(location_ids))
-    stats_response = StatsResponse(
-        life_periods=count_life_periods,
-        experiences=count_experiences,
-        media_assets=count_media_assets,
-        cities_visited=query.with_entities(
-            func.count(func.distinct(Location.city))).scalar(),
-        countries_visited=query.with_entities(
-            func.count(func.distinct(Location.country))).scalar(),
-        experience_type_agg=experience_type_agg
+        year=year,
+        start_date=start_date,
+        end_date=end_date,
     )
-    return stats_response
+
+@api.get("/chronicle/summary")
+def get_chronicle_summary(db: SASession = Depends(get_db), year: Optional[int] = None,
+                 start_date: Optional[date] = None, end_date: Optional[date] = None,
+                 experience_limit: Optional[int] = None,
+                 media_asset_limit: Optional[int] = 0):
+    user = get_current_user(db)
+    chronicle = get_chronicle(
+        user_id=user.id, db=db, cap=True, year=year, start_date=start_date, end_date=end_date, experience_limit=experience_limit, media_asset_limit=media_asset_limit
+    )
+    stats = get_chronicle_stats_service(
+        user.id, db, year=year, start_date=start_date, end_date=end_date
+    )
+    client = OpenAI(
+        api_key=os.getenv("CHATANYWHERE_API_KEY") or os.getenv("OPENAI_API_KEY"),
+        base_url="https://api.chatanywhere.tech/v1",
+    )
+
+    chronicle_data = [
+        SummaryLifePeriodResponse.model_validate(life_period).model_dump(
+            mode="json"
+        )
+        for life_period in chronicle
+    ]
+    stats_data = stats.model_dump(mode="json")
+    response = client.chat.completions.create(
+        model=os.getenv("CHATANYWHERE_MODEL", "gpt-5.6-luna"),
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "只用下面给出的内容，用其中出现最多的语言，生成一份围绕4个关键词的简短总结。从个人成长的角度概括并分析数据和内容，用第二人称。每点前用序号，用markdown强调数字和主题词。\n"
+                    + json.dumps(
+                        {"chronicle": chronicle_data, "stats": stats_data},
+                        ensure_ascii=False,
+                    )
+                ),
+            }
+        ],
+    )
+
+    return (
+        response.choices[0].message.content,
+        chronicle_data,
+        stats_data,
+    )
 
 
 '''

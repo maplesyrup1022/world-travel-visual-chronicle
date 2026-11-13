@@ -22,6 +22,13 @@ export default function Timeline({ onDateRangeChange }) {
   const [startDateText, setStartDateText] = useState(formatDateInput(MIN_DATE));
   const [endDateText, setEndDateText] = useState(formatDateInput(MAX_DATE));
   const [selectedYear, setSelectedYear] = useState(CURRENT_YEAR);
+  const [dateRangeParams, setDateRangeParams] = useState(
+    () =>
+      new URLSearchParams({
+        start_date: MIN_DATE,
+        end_date: MAX_DATE,
+      }),
+  );
 
   const updateYear = (value) => {
     const year = Number(value);
@@ -32,6 +39,7 @@ export default function Timeline({ onDateRangeChange }) {
     setEndDate(nextEndDate);
     setStartDateText(formatDateInput(nextStartDate));
     setEndDateText(formatDateInput(nextEndDate));
+    setDateRangeParams(new URLSearchParams({ year: String(year) }));
     onDateRangeChange?.({
       startDate: nextStartDate,
       endDate: nextEndDate,
@@ -45,6 +53,9 @@ export default function Timeline({ onDateRangeChange }) {
     if (!value || value < MIN_DATE || value > endDate) return;
     setStartDate(value);
     setSelectedYear(Number(value.slice(0, 4)));
+    setDateRangeParams(
+      new URLSearchParams({ start_date: value, end_date: endDate }),
+    );
     onDateRangeChange?.({ startDate: value, endDate });
   };
 
@@ -54,6 +65,9 @@ export default function Timeline({ onDateRangeChange }) {
     if (!value || value < startDate || value > MAX_DATE) return;
     setEndDate(value);
     setSelectedYear(Number(value.slice(0, 4)));
+    setDateRangeParams(
+      new URLSearchParams({ start_date: startDate, end_date: value }),
+    );
     onDateRangeChange?.({ startDate, endDate: value });
   };
 
@@ -75,7 +89,7 @@ export default function Timeline({ onDateRangeChange }) {
               YEAR <span className="text-2xl">{selectedYear}</span>
             </p>
             <Link
-              href="/chronicle"
+              href={`/chronicle?${dateRangeParams.toString()}`}
               className="shrink-0 rounded-full border border-white/45 px-3 py-2 font-sans text-[10px] font-bold uppercase tracking-[0.12em] text-gray-100 transition hover:bg-white/15"
             >
               View chronicle

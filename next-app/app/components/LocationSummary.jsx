@@ -1,12 +1,8 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import {
-  formatDateInput,
-  formatDateRangeInput,
-  parseDateInput,
-  parseDateRangeInput,
-} from "./dateInput";
+import { formatDateRangeInput, parseDateRangeInput } from "./dateInput";
+import { mediaUrl } from "./mediaUrl";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -19,33 +15,6 @@ const markerColors = [
 ];
 
 const textColors = ["text-[#307b9c]", "text-[#1a385d]"];
-const fieldClass =
-  "w-full rounded border border-[#9e4d58]/35 bg-white/80 px-2 py-1 text-sm text-[#1a385d] outline-none focus:border-[#9e4d58] focus:ring-1 focus:ring-[#9e4d58]";
-
-const EditableValue = ({
-  editing,
-  value,
-  onChange,
-  label,
-  type = "text",
-  multiline = false,
-  className = "",
-}) => {
-  if (!editing) return value || null;
-
-  const commonProps = {
-    "aria-label": label,
-    className: `${fieldClass} ${className}`,
-    onChange: (event) => onChange(event.target.value),
-    value: value ?? "",
-  };
-
-  return multiline ? (
-    <textarea {...commonProps} rows={2} />
-  ) : (
-    <input {...commonProps} type={type} />
-  );
-};
 
 const readResponse = async (response) => {
   const body = await response.text();
@@ -203,15 +172,6 @@ const LocationSummary = ({
           return;
         }
         dateRanges.set(`experience-${experience.id}`, experienceDateRange);
-
-        for (const media of experience.media_assets) {
-          if (media.captured_at && !parseDateInput(media.captured_at)) {
-            setError(
-              `Enter the capture date for "${media.title || "this memory"}" as YYYY/MM/DD.`,
-            );
-            return;
-          }
-        }
       }
     }
 
@@ -246,11 +206,6 @@ const LocationSummary = ({
           for (const media of experience.media_assets) {
             await sendUpdate(`/media-assets/${media.id}`, {
               title: optionalText(media.title),
-              description: optionalText(media.description),
-              file_url: media.file_url,
-              captured_at: media.captured_at
-                ? parseDateInput(media.captured_at)
-                : null,
             });
           }
         }
@@ -288,6 +243,26 @@ const LocationSummary = ({
       setDraft(updatedSummary);
     } catch (deleteError) {
       setError(deleteError.message || "Unable to delete this item.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteMedia = async (mediaId, locationId) => {
+    if (!window.confirm("Delete this picture?")) return;
+
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE}/media-assets/${mediaId}`, {
+        method: "DELETE",
+      });
+      await readResponse(response);
+      const updatedSummary = await refreshSummary(locationId);
+      onSummaryChange(updatedSummary);
+      setDraft(updatedSummary);
+    } catch (deleteError) {
+      setError(deleteError.message || "Unable to delete this picture.");
     } finally {
       setBusy(false);
     }
@@ -363,15 +338,6 @@ const LocationSummary = ({
       >
         <div className="pointer-events-none absolute inset-0 bg-[rgba(255,250,248,0.34)]" />
 
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close location summary"
-          className="absolute right-4 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[#8d4650]/35 bg-[#fff8f5]/85 font-sans text-xl leading-none text-[#71353e] shadow-sm transition hover:bg-white"
-        >
-          ×
-        </button>
-
         <form
           onSubmit={handleSave}
           className="relative flex h-full flex-col px-7 py-6"
@@ -381,52 +347,88 @@ const LocationSummary = ({
               {location?.city || "Unknown city"},{" "}
               {location?.country || "Unknown country"}
             </h2>
-            {editing ? (
-              <div className="absolute right-14 top-4 z-20 flex gap-1">
+            <div className="absolute right-4 top-4 z-20 flex items-center gap-2">
+              {editing ? (
                 <button
                   type="button"
                   disabled={busy}
                   onClick={cancelEditing}
-                  className="rounded border border-[#8d4650]/35 bg-white/90 px-2 py-1 text-xs font-bold text-[#71353e] disabled:opacity-50"
+                  aria-label="Cancel summary edits"
+                  title="Cancel"
+                  className="flex h-8 items-center justify-center rounded-full border border-[#8d4650]/35 bg-white/90 px-3 text-xs font-bold text-[#71353e] shadow-sm transition hover:bg-white disabled:opacity-50"
                 >
                   Cancel
                 </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setDraft(hoveredLocationSummary);
+                    setError("");
+                    setEditing(true);
+                  }}
+                  aria-label="Edit location summary"
+                  title="Edit location summary"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#8d4650]/35 bg-[#fff8f5]/90 text-[#71353e] shadow-sm transition hover:bg-white disabled:opacity-50"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      d="m13.9 3.6 2.5 2.5M4 16l3.2-.7L16 6.5a1.8 1.8 0 0 0-2.5-2.5L4.7 12.8 4 16Z"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.6"
+                    />
+                  </svg>
+                </button>
+              )}
+              {editing ? (
                 <button
                   type="submit"
                   disabled={busy}
-                  className="rounded bg-[#71353e] px-2 py-1 text-xs font-bold text-white disabled:opacity-50"
+                  aria-label={busy ? "Saving summary" : "Save summary"}
+                  title={busy ? "Saving..." : "Save"}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[#71353e] text-white shadow-sm transition hover:bg-[#8d4650] disabled:opacity-50"
                 >
-                  {busy ? "Saving..." : "Save"}
+                  {busy ? (
+                    <span
+                      aria-hidden="true"
+                      className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                    />
+                  ) : (
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      className="h-4 w-4"
+                    >
+                      <path
+                        d="M4 3.5h10.8L17 5.7v10.8H3V3.5h1Zm2 0v5h8v-5M6 16v-5h8v5"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.5"
+                      />
+                    </svg>
+                  )}
                 </button>
-              </div>
-            ) : (
+              ) : null}
               <button
                 type="button"
-                onClick={() => {
-                  setDraft(hoveredLocationSummary);
-                  setError("");
-                  setEditing(true);
-                }}
-                aria-label="Edit location summary"
-                title="Edit location summary"
-                className="absolute right-14 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[#8d4650]/35 bg-[#fff8f5]/90 text-[#71353e] shadow-sm transition hover:bg-white"
+                onClick={onClose}
+                aria-label="Close location summary"
+                title="Close"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-[#8d4650]/35 bg-[#fff8f5]/85 font-sans text-xl leading-none text-[#71353e] shadow-sm transition hover:bg-white"
               >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 20 20"
-                  fill="none"
-                  className="h-4 w-4"
-                >
-                  <path
-                    d="m13.9 3.6 2.5 2.5M4 16l3.2-.7L16 6.5a1.8 1.8 0 0 0-2.5-2.5L4.7 12.8 4 16Z"
-                    stroke="currentColor"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="1.6"
-                  />
-                </svg>
+                ×
               </button>
-            )}
+            </div>
           </div>
 
           {error ? (
@@ -661,99 +663,64 @@ const LocationSummary = ({
                                 ) : null}
 
                                 {experience.media_assets?.length > 0 ? (
-                                  <div className="mt-3 space-y-2">
+                                  <div className="mt-1 grid grid-cols-3 gap-2">
                                     {experience.media_assets.map((media) => (
                                       <div
                                         key={`media-asset-${media.id}`}
-                                        className="flex items-start gap-2"
+                                        className="min-w-0"
                                       >
-                                        <figure className="w-26 shrink-0 -rotate-2 bg-white p-1.5 pb-5 shadow-[1px_3px_5px_rgba(42,55,42,0.2)]">
-                                          <img
-                                            src={media.file_url}
-                                            alt={media.title || "Travel memory"}
-                                            className="aspect-square w-full object-cover"
+                                        <figure className="w-full -rotate-2 bg-white p-1.5 shadow-[1px_3px_5px_rgba(42,55,42,0.2)]">
+                                          <div className="relative">
+                                            <img
+                                              src={mediaUrl(media.file_url)}
+                                              alt={
+                                                media.title || "Travel memory"
+                                              }
+                                              className="aspect-square w-full object-cover"
+                                            />
+                                            {editing ? (
+                                              <button
+                                                type="button"
+                                                disabled={busy}
+                                                onClick={() =>
+                                                  handleDeleteMedia(
+                                                    media.id,
+                                                    location.id,
+                                                  )
+                                                }
+                                                aria-label={`Delete picture ${media.title || "without a title"}`}
+                                                title="Delete picture"
+                                                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-white/95 text-base leading-none text-[#71353e] shadow transition hover:bg-white disabled:opacity-50"
+                                              >
+                                                ×
+                                              </button>
+                                            ) : null}
+                                          </div>
+                                          <input
+                                            aria-label="Media title"
+                                            className="w-full bg-transparent text-center text-sm font-bold outline-none focus:ring-1 focus:ring-[#9e4d58]/40"
+                                            disabled={busy}
+                                            readOnly={!editing}
+                                            onChange={(event) =>
+                                              updateMediaAsset(
+                                                lifePeriod.id,
+                                                experience.id,
+                                                media.id,
+                                                "title",
+                                                event.target.value,
+                                              )
+                                            }
+                                            type="text"
+                                            value={media.title || ""}
                                           />
                                         </figure>
-                                        {editing ? (
-                                          <div className="min-w-0 flex-1 space-y-1">
-                                            <EditableValue
-                                              editing
-                                              value={media.title}
-                                              onChange={(value) =>
-                                                updateMediaAsset(
-                                                  lifePeriod.id,
-                                                  experience.id,
-                                                  media.id,
-                                                  "title",
-                                                  value,
-                                                )
-                                              }
-                                              label="Media title"
-                                            />
-                                            <EditableValue
-                                              editing
-                                              value={media.file_url}
-                                              onChange={(value) =>
-                                                updateMediaAsset(
-                                                  lifePeriod.id,
-                                                  experience.id,
-                                                  media.id,
-                                                  "file_url",
-                                                  value,
-                                                )
-                                              }
-                                              label="Media file URL"
-                                            />
-                                            <EditableValue
-                                              editing
-                                              value={media.description}
-                                              onChange={(value) =>
-                                                updateMediaAsset(
-                                                  lifePeriod.id,
-                                                  experience.id,
-                                                  media.id,
-                                                  "description",
-                                                  value,
-                                                )
-                                              }
-                                              label="Media description"
-                                              multiline
-                                            />
-                                            <input
-                                              aria-label="Media capture date"
-                                              className={fieldClass}
-                                              inputMode="numeric"
-                                              onChange={(event) =>
-                                                updateMediaAsset(
-                                                  lifePeriod.id,
-                                                  experience.id,
-                                                  media.id,
-                                                  "captured_at",
-                                                  event.target.value,
-                                                )
-                                              }
-                                              placeholder="YYYY/MM/DD"
-                                              value={formatDateInput(
-                                                media.captured_at,
-                                              )}
-                                            />
-                                          </div>
-                                        ) : (
-                                          <div className="min-w-0">
-                                            {media.title ? (
-                                              <p className="text-sm font-bold">
-                                                {media.title}
-                                              </p>
-                                            ) : null}
-                                            {media.description ? (
-                                              <p
-                                                className={`text-sm ${textColors[1]}`}
-                                              >
-                                                {media.description}
-                                              </p>
-                                            ) : null}
-                                          </div>
-                                        )}
+                                        {!editing && media.description ? (
+                                          <p
+                                            className={`mt-1 text-xs ${textColors[1]}`}
+                                          >
+                                            {media.description}
+                                          </p>
+                                        ) : null}
                                       </div>
                                     ))}
                                   </div>

@@ -178,6 +178,25 @@ class MediaAssetResponse(BaseModel):
     experience_id: Optional[int] = None
     location_id: Optional[int] = None
 
+class MediaAssetInfoExperienceResponse(BaseModel):
+    id: int
+    title: str
+
+
+class MediaAssetInfoResponse(BaseModel):
+    captured_at: Optional[date] = None
+    locations: Optional[LocationCreate] = None
+    experiences: List[MediaAssetInfoExperienceResponse] = Field(
+        default_factory=list
+    )
+
+
+class LocationNameResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    city: str
+    country: str
+
 
 class SummaryExperienceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -188,7 +207,7 @@ class SummaryExperienceResponse(BaseModel):
     experience_type: Optional[str] = None
     start_date: date
     end_date: date
-    location_id: Optional[int] = None
+    location: Optional[LocationNameResponse] = None
     life_period_id: Optional[int] = None
     media_assets: List[MediaAssetResponse] = Field(default_factory=list)
 
@@ -202,7 +221,7 @@ class SummaryLifePeriodResponse(BaseModel):
     start_date: date
     end_date: date
     tag: Optional[str] = None
-    location_id: int
+    location: LocationNameResponse
     experiences: List[SummaryExperienceResponse] = Field(default_factory=list)
 
 
