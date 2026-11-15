@@ -29,7 +29,7 @@ from api_schema import (
 from db_init import Experience, LifePeriod, Location, MediaAsset, User, Session
 
 # test use only replaced with user auth later
-CURRENT_USER_ID = 1
+user_id = int(os.getenv("CURRENT_USER_ID"))
 
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -47,7 +47,7 @@ def get_db():
 
 
 def get_current_user(db: SASession) -> User:
-    user = db.query(User).filter(User.id == CURRENT_USER_ID).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
