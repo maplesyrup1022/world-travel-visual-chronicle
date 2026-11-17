@@ -354,7 +354,7 @@ export default function Create() {
           longitude: selectedPlace.longitude,
         },
       };
-      url = "http://127.0.0.1:8000/life-periods";
+      url = `${backendUrl}/life-periods`;
     } else if (activeForm === "experience") {
       const startDate = parseDateInput(req["start_date*"]);
       const endDate = parseDateInput(req["end_date*"]);
@@ -382,7 +382,7 @@ export default function Create() {
             }
           : null,
       };
-      url = "http://127.0.0.1:8000/experiences";
+      url = `${backendUrl}/experiences`;
     } else if (activeForm === "media") {
       const file = req.file;
       if (!(file instanceof File) || file.size === 0) {
