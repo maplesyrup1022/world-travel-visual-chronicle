@@ -76,9 +76,9 @@ load_dotenv()
 api = FastAPI(title="World Travel Visual Chronicle API")
 api.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+frontend_url = os.getenv("FRONTEND_URL")
 origins = [
-    "http://localhost:3000",  # Next.js dev server
-    "http://127.0.0.1:3000",
+    frontend_url
 ]
 
 api.add_middleware(

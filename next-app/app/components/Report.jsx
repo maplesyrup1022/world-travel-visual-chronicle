@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+
 const markdownComponents = {
   h1: ({ children }) => (
     <h3 className="mb-3 mt-6 font-alegreya text-2xl font-bold text-[#674b43] first:mt-0 sm:text-3xl">
@@ -65,7 +67,7 @@ const Report = ({ querySuffix = "", periodLabel = "All dates" }) => {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/chronicle/summary${querySuffix}`,
+        `${backendUrl}/chronicle/summary${querySuffix}`,
       );
       if (!response.ok) {
         const detail = await response.text();

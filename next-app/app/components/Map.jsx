@@ -9,6 +9,7 @@ import Timeline from "./Timeline";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 const Map = ({ visitedLocations }) => {
   const mapContainerRef = useRef();
@@ -30,7 +31,7 @@ const Map = ({ visitedLocations }) => {
     const requestId = ++summaryRequestRef.current;
     const query = params.toString();
     const res = await fetch(
-      `http://127.0.0.1:8000/locations/${id}/summary${query ? `?${query}` : ""}`,
+      `${backendUrl}/locations/${id}/summary${query ? `?${query}` : ""}`,
       { next: { revalidate: 20 } },
     );
 
@@ -106,7 +107,7 @@ const Map = ({ visitedLocations }) => {
     setDateRangeQuery(params.toString());
     const selectedSummary = clickedLocationSummary || hoveredLocationSummary;
     const responsePromise = fetch(
-      `http://127.0.0.1:8000/locations/visited?${params.toString()}`,
+      `${backendUrl}/locations/visited?${params.toString()}`,
     );
     const summaryPromise = selectedSummary
       ? fetchLocationSummary(selectedSummary.location.id, params)

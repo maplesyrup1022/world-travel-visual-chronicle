@@ -1,6 +1,6 @@
-const API_ORIGIN = "http://127.0.0.1:8000";
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 export const mediaUrl = (fileUrl) => {
   if (!fileUrl) return "";
-  return new URL(fileUrl, API_ORIGIN).toString();
+  return new URL(fileUrl, backendUrl).toString();
 };

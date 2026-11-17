@@ -4,7 +4,7 @@ import React, { useRef, useState } from "react";
 import { formatDateRangeInput, parseDateRangeInput } from "./dateInput";
 import { mediaUrl } from "./mediaUrl";
 
-const API_BASE = "http://127.0.0.1:8000";
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 const markerColors = [
   "bg-[#FFCAD4]",
@@ -43,7 +43,7 @@ const readResponse = async (response) => {
 };
 
 const sendUpdate = async (path, data) => {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${backendUrl}${path}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -134,7 +134,7 @@ const LocationSummary = ({
   const refreshSummary = async (locationId) => {
     const query = dateRangeQuery ? `?${dateRangeQuery}` : "";
     const response = await fetch(
-      `${API_BASE}/locations/${locationId}/summary${query}`,
+      `${backendUrl}/locations/${locationId}/summary${query}`,
       { cache: "no-store" },
     );
     return readResponse(response);
@@ -232,7 +232,7 @@ const LocationSummary = ({
     setError("");
     try {
       const response = await fetch(
-        `${API_BASE}/${kind === "life-period" ? "life-periods" : "experiences"}/${id}`,
+        `${backendUrl}/${kind === "life-period" ? "life-periods" : "experiences"}/${id}`,
         {
           method: "DELETE",
         },
@@ -254,7 +254,7 @@ const LocationSummary = ({
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`${API_BASE}/media-assets/${mediaId}`, {
+      const response = await fetch(`${backendUrl}/media-assets/${mediaId}`, {
         method: "DELETE",
       });
       await readResponse(response);

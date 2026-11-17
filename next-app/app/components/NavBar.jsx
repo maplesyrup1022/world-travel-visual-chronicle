@@ -1,7 +1,9 @@
 import React from "react";
 
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+
 const NavBar = async () => {
-  const res = await fetch("http://127.0.0.1:8000/user/current");
+  const res = await fetch(`${backendUrl}/user/current`);
   const user = await res.json();
   return (
     <nav className="pointer-events-none absolute left-0 top-0 z-30 w-full px-5 py-4 sm:px-8">

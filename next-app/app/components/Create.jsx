@@ -3,6 +3,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { formatDateInput, parseDateInput } from "./dateInput";
 
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+
 const actions = [
   { key: "life-period", label: "Life Period", className: "bg-[#f49ab8]" },
   { key: "experience", label: "Experience", className: "bg-[#ef739d]" },
@@ -168,10 +170,9 @@ export default function Create() {
         if (lifePeriodQuery.trim()) {
           params.set("search", lifePeriodQuery.trim());
         }
-        const response = await fetch(
-          `http://127.0.0.1:8000/life-periods?${params}`,
-          { signal: controller.signal },
-        );
+        const response = await fetch(`${backendUrl}/life-periods?${params}`, {
+          signal: controller.signal,
+        });
         const body = await response.text();
         const result = body ? JSON.parse(body) : [];
         if (!response.ok) {
@@ -216,10 +217,9 @@ export default function Create() {
           search: experienceQuery.trim(),
           limit: "5",
         });
-        const response = await fetch(
-          `http://127.0.0.1:8000/experiences?${params}`,
-          { signal: controller.signal },
-        );
+        const response = await fetch(`${backendUrl}/experiences?${params}`, {
+          signal: controller.signal,
+        });
         const body = await response.text();
         const result = body ? JSON.parse(body) : [];
         if (!response.ok) {
@@ -262,17 +262,14 @@ export default function Create() {
       setExperienceSearchError("");
       setExperienceDropdownOpen(false);
       try {
-        const response = await fetch(
-          `http://127.0.0.1:8000/media-assets/info`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": selectedFile.type || "application/octet-stream",
-            },
-            body: selectedFile,
-            signal: controller.signal,
+        const response = await fetch(`${backendUrl}/media-assets/info`, {
+          method: "POST",
+          headers: {
+            "Content-Type": selectedFile.type || "application/octet-stream",
           },
-        );
+          body: selectedFile,
+          signal: controller.signal,
+        });
         const result = await response.json();
         if (!response.ok) {
           throw new Error(
@@ -422,7 +419,7 @@ export default function Create() {
         params.set("longitude", selectedPlace.longitude);
         params.set("latitude", selectedPlace.latitude);
       }
-      url = `http://127.0.0.1:8000/media-assets?${params.toString()}`;
+      url = `${backendUrl}/media-assets?${params.toString()}`;
     }
 
     try {

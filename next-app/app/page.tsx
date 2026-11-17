@@ -1,8 +1,10 @@
 import Map from "./components/Map";
 import NavigationBar from "./components/NavBar";
 
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+
 export default async function Home() {
-  const res = await fetch("http://127.0.0.1:8000/locations/visited", {
+  const res = await fetch(`${backendUrl}/locations/visited`, {
     next: { revalidate: 20 },
   });
   const visitedLocations = await res.json();

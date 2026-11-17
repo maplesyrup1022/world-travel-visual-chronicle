@@ -1,5 +1,7 @@
 import Chronicle from "../components/Chronicle";
 
+const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+
 type ChronicleSearchParams = {
   year?: string;
   start_date?: string;
@@ -27,17 +29,16 @@ export default async function ChroniclePage({
       ? `${selectedParams.start_date} – ${selectedParams.end_date}`
       : "All dates");
 
-  const res = await fetch(`http://127.0.0.1:8000/chronicle${querySuffix}`, {
+  const res = await fetch(`${backendUrl}/chronicle${querySuffix}`, {
     next: { revalidate: 20 },
   });
   if (!res.ok) {
     throw new Error(`Could not load chronicle (${res.status}).`);
   }
   const chronicle = await res.json();
-  const res2 = await fetch(
-    `http://127.0.0.1:8000/chronicle/stats${querySuffix}`,
-    { next: { revalidate: 20 } },
-  );
+  const res2 = await fetch(`${backendUrl}/chronicle/stats${querySuffix}`, {
+    next: { revalidate: 20 },
+  });
   if (!res2.ok) {
     throw new Error(`Could not load chronicle stats (${res2.status}).`);
   }
